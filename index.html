@@ -239,6 +239,63 @@
   .btn-soft { background: #efefef; border: none; border-radius: 8px; padding: 9px 14px; font-weight: 700; color: #555; cursor: pointer; font-size: 13px; }
 
   .hint { font-size: 12px; color: #aaa; margin-top: 6px; line-height: 1.4; }
+
+  /* settings select + range */
+  select.select { border: none; background: #efefef; border-radius: 8px; padding: 9px 10px; font-size: 14px; font-weight: 600; color: #444; cursor: pointer; }
+  input[type="range"] { accent-color: #45474b; }
+
+  /* ---- weekday streak strip ---- */
+  .weekstrip { display: flex; justify-content: space-between; gap: 6px; margin-top: 16px; }
+  .wday { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
+  .wday .lbl { font-size: 11px; opacity: 0.7; font-weight: 800; }
+  .wday .ring {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: rgba(0, 0, 0, 0.18);
+    display: flex; align-items: center; justify-content: center; position: relative;
+  }
+  .wday.future .ring { opacity: 0.5; }
+  .wday.done .ring { background: var(--ink); }
+  .wday.done .ring::after {
+    content: ""; width: 6px; height: 11px;
+    border: solid var(--bg); border-width: 0 2.5px 2.5px 0;
+    transform: rotate(45deg); margin-top: -2px;
+  }
+  .wday.today .ring { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55); }
+
+  /* ---- streak celebration ---- */
+  .celebrate {
+    position: fixed; inset: 0; background: var(--bg); color: var(--ink);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; z-index: 200; padding: 24px;
+  }
+  .celebrate.open { display: flex; }
+  .cel-flame { font-size: clamp(90px, 28vw, 130px); line-height: 1; transform: scale(0); }
+  .celebrate.open .cel-flame { animation: flamePop 0.6s cubic-bezier(0.2, 1.4, 0.4, 1) forwards; }
+  @keyframes flamePop { 0% { transform: scale(0); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }
+  .cel-num { font-size: clamp(64px, 20vw, 92px); font-weight: 800; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .cel-copy { font-size: 21px; font-weight: 700; opacity: 0; transition: opacity 0.4s; }
+  .cel-copy.show { opacity: 1; }
+  .cel-strip { max-width: 360px; width: 100%; margin-top: 32px; }
+  .cel-strip .ring { width: 38px; height: 38px; }
+  .cel-strip .lbl { font-size: 13px; }
+  .cel-strip .wday { opacity: 0; transform: translateY(12px); transition: opacity 0.35s, transform 0.35s; }
+  .cel-strip .wday.in { opacity: 1; transform: translateY(0); }
+  .cel-strip .wday.pop .ring { animation: ringPop 0.5s cubic-bezier(0.2, 1.5, 0.4, 1); }
+  @keyframes ringPop { 0% { transform: scale(1); } 50% { transform: scale(1.35); } 100% { transform: scale(1); } }
+  .cel-btn {
+    margin-top: 36px; background: var(--ink); color: var(--bg);
+    border: none; border-radius: 10px; font-weight: 800; font-size: 18px;
+    padding: 14px 42px; cursor: pointer; opacity: 0; transition: opacity 0.4s;
+    box-shadow: 0 5px 0 rgba(0, 0, 0, 0.18);
+  }
+  .cel-btn:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18); }
+  .cel-btn.show { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .celebrate.open .cel-flame { animation: none; transform: scale(1); }
+    .cel-strip .wday { transition: none; }
+    .cel-strip .wday.pop .ring { animation: none; }
+  }
 </style>
 
 <div class="wrap">
@@ -282,6 +339,7 @@
     </div>
     <div class="bar"><div id="todayBar" style="width:0%"></div></div>
     <div class="goal-done" id="goalMsg"></div>
+    <div class="weekstrip" id="weekStrip"></div>
   </div>
 
   <div class="tasks">
@@ -320,8 +378,20 @@
 
       <div class="set-group">
         <div class="g-title">🔔 Sound</div>
-        <div class="set-row"><span class="name">Alarm when timer ends</span><div class="toggle on" id="cfgSound"></div></div>
+        <div class="set-row"><span class="name">Alarm when timer ends</span><div class="toggle" id="cfgSound"></div></div>
+        <div class="set-row"><span class="name">Alarm sound</span>
+          <select id="cfgAlarm" class="select">
+            <option value="chime">Chime</option>
+            <option value="bell">Bell</option>
+            <option value="digital">Digital</option>
+            <option value="beep">Beep</option>
+          </select>
+        </div>
+        <div class="set-row"><span class="name">Volume</span><input type="range" min="0" max="100" id="cfgVolume" style="width:150px" /></div>
+        <div class="set-row"><span class="name">Repeat alarm</span><input type="number" min="1" id="cfgRepeat" class="small" /></div>
+        <div class="set-row"><span class="name">Button click sounds</span><div class="toggle" id="cfgClick"></div></div>
         <div class="set-row"><span class="name">Desktop notification</span><div class="toggle" id="cfgNotify"></div></div>
+        <div class="set-row" style="justify-content:flex-start"><button class="btn-soft" id="testSound">▶ Test alarm</button></div>
       </div>
 
       <div class="set-group">
@@ -386,6 +456,15 @@
   </div>
 </div>
 
+<!-- Streak celebration -->
+<div class="celebrate" id="celebrate">
+  <div class="cel-flame" id="celFlame">🔥</div>
+  <div class="cel-num" id="celNum">0</div>
+  <div class="cel-copy" id="celCopy">day streak!</div>
+  <div class="weekstrip cel-strip" id="celStrip"></div>
+  <button class="cel-btn" id="celBtn">Continue</button>
+</div>
+
 <script>
 "use strict";
 
@@ -403,6 +482,7 @@ const DEFAULTS = {
     pomodoro: 45, short: 5, long: 15, interval: 4, goal: 4,
     autoBreak: false, autoPomo: false, sound: true, notify: false,
     color: "186 73 73",
+    alarm: "chime", volume: 0.5, alarmRepeat: 1, click: true,
   },
   history: {},   // "YYYY-MM-DD": sessionCount
   minutes: {},   // "YYYY-MM-DD": focus minutes (for total time)
@@ -530,7 +610,7 @@ function pauseTimer() {
   el.startBtn.textContent = "Start";
   renderTime();
 }
-function toggleTimer() { running ? pauseTimer() : startTimer(); }
+function toggleTimer() { playClick(); running ? pauseTimer() : startTimer(); }
 
 function resetTimerTo(m, autoStart = false) {
   cancelAnimationFrame(raf);
@@ -576,31 +656,67 @@ function recordSession() {
     if (t) t.done = (t.done || 0) + 1;
   }
   save();
-  // celebrate hitting the daily goal
+  // celebrate the moment the streak grows (i.e. today's goal just got met)
   const newStreak = computeStreak().streak;
-  if (state.history[k] === state.config.goal) {
-    confetti();
+  if (newStreak > prevStreak) {
     notify(`Daily goal hit! 🔥 ${newStreak}-day streak.`);
+    celebrate(prevStreak, newStreak);
   }
 }
 
-/* ---------------- alarm + confetti ---------------- */
+/* ---------------- sound engine (synthesized, no audio files) ---------------- */
 let audioCtx = null;
+function ac() {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+/* one short tone: freq Hz, start offset s, duration s, waveform, volume 0..1 */
+function blip(freq, start, dur, type, vol) {
+  const c = ac();
+  const t0 = c.currentTime + start;
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = type || "sine";
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol), t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(c.destination);
+  o.start(t0); o.stop(t0 + dur + 0.03);
+}
+/* each alarm = list of [freq, startOffset, duration, waveform] */
+const ALARMS = {
+  chime:   [[880, 0, 0.5, "sine"], [1175, 0.16, 0.5, "sine"], [1568, 0.32, 0.6, "sine"]],
+  bell:    [[1568, 0, 1.1, "triangle"], [2093, 0, 1.1, "sine"], [3136, 0, 0.6, "sine"]],
+  digital: [[988, 0, 0.11, "square"], [988, 0.18, 0.11, "square"], [988, 0.36, 0.11, "square"], [988, 0.54, 0.11, "square"]],
+  beep:    [[660, 0, 0.22, "sawtooth"], [660, 0.34, 0.22, "sawtooth"], [660, 0.68, 0.22, "sawtooth"]],
+};
 function playAlarm() {
   try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const now = audioCtx.currentTime;
-    [0, 0.18, 0.36].forEach((t, i) => {
-      const o = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      o.type = "sine";
-      o.frequency.value = [880, 1175, 1568][i];
-      g.gain.setValueAtTime(0.0001, now + t);
-      g.gain.exponentialRampToValueAtTime(0.4, now + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.5);
-      o.connect(g); g.connect(audioCtx.destination);
-      o.start(now + t); o.stop(now + t + 0.5);
-    });
+    const v = state.config.volume ?? 0.5;
+    if (v <= 0) return;
+    const notes = ALARMS[state.config.alarm] || ALARMS.chime;
+    const reps = Math.max(1, state.config.alarmRepeat || 1);
+    const span = 0.9; // gap between repeats
+    for (let r = 0; r < reps; r++)
+      notes.forEach(([f, s, d, t]) => blip(f, s + r * span, d, t, v * 0.5));
+  } catch (e) { /* ignore */ }
+}
+function playClick() {
+  try {
+    if (!state.config.click) return;
+    const v = state.config.volume ?? 0.5;
+    if (v <= 0) return;
+    blip(420, 0, 0.05, "triangle", v * 0.22);
+    blip(640, 0.018, 0.05, "sine", v * 0.18);
+  } catch (e) { /* ignore */ }
+}
+function playStreakSound() {
+  try {
+    const v = state.config.volume ?? 0.5;
+    if (v <= 0) return;
+    [[523, 0], [659, 0.12], [784, 0.24], [1047, 0.4]].forEach(([f, s]) => blip(f, s, 0.45, "triangle", v * 0.5));
   } catch (e) { /* ignore */ }
 }
 function confetti() {
@@ -622,6 +738,85 @@ function notify(msg) {
   if (!state.config.notify) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   try { new Notification("nicofocus", { body: msg }); } catch (e) {}
+}
+
+/* ---------------- weekday streak strip + celebration ---------------- */
+const WEEK_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+function weekDays() {
+  const today = new Date();
+  const sunday = new Date(today);
+  sunday.setDate(today.getDate() - today.getDay()); // back to Sunday
+  const goal = state.config.goal;
+  const tKey = dayKey(today);
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(sunday);
+    d.setDate(sunday.getDate() + i);
+    const k = dayKey(d);
+    out.push({
+      letter: WEEK_LETTERS[i], key: k,
+      done: (state.history[k] || 0) >= goal,
+      isToday: k === tKey,
+      future: d > today && k !== tKey,
+    });
+  }
+  return out;
+}
+function renderWeek(container) {
+  if (!container) return;
+  container.innerHTML = "";
+  weekDays().forEach((d) => {
+    const w = document.createElement("div");
+    w.className = "wday" + (d.done ? " done" : "") + (d.isToday ? " today" : "") + (d.future ? " future" : "");
+    w.innerHTML = `<div class="lbl">${d.letter}</div><div class="ring"></div>`;
+    container.appendChild(w);
+  });
+}
+
+function countUp(elm, from, to, dur) {
+  const start = performance.now();
+  function frame(now) {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3);
+    elm.textContent = Math.round(from + (to - from) * eased);
+    if (t < 1) requestAnimationFrame(frame);
+    else elm.textContent = to;
+  }
+  requestAnimationFrame(frame);
+}
+
+function celebrate(prevStreak, newStreak) {
+  const cel = document.getElementById("celebrate");
+  const strip = document.getElementById("celStrip");
+  const numEl = document.getElementById("celNum");
+  const copyEl = document.getElementById("celCopy");
+  const btnEl = document.getElementById("celBtn");
+
+  renderWeek(strip);
+  numEl.textContent = prevStreak;
+  copyEl.textContent = newStreak === 1 ? "day streak!" : "day streak!";
+  copyEl.classList.remove("show");
+  btnEl.classList.remove("show");
+  cel.classList.add("open");
+
+  confetti();
+  playStreakSound();
+
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const days = strip.querySelectorAll(".wday");
+  if (reduce) {
+    numEl.textContent = newStreak;
+    days.forEach((w) => w.classList.add("in"));
+    copyEl.classList.add("show");
+    btnEl.classList.add("show");
+    return;
+  }
+  setTimeout(() => countUp(numEl, prevStreak, newStreak, 700), 350);
+  days.forEach((w, i) => setTimeout(() => w.classList.add("in"), 650 + i * 90));
+  const todayEl = strip.querySelector(".wday.today");
+  const lastBeat = 650 + 7 * 90;
+  setTimeout(() => { if (todayEl) todayEl.classList.add("pop"); }, lastBeat);
+  setTimeout(() => { copyEl.classList.add("show"); btnEl.classList.add("show"); }, lastBeat + 220);
 }
 
 /* ---------------- DOM refs ---------------- */
@@ -664,6 +859,7 @@ function renderAll() {
     `${goal - today} more to keep your streak.`;
 
   el.roundCounter.textContent = "#" + ((state.pomoSinceLong || 0) % state.config.interval + 1);
+  renderWeek(document.getElementById("weekStrip"));
   renderTasks();
 }
 
@@ -814,14 +1010,18 @@ function importData(file) {
 /* ---------------- events ---------------- */
 el.startBtn.addEventListener("click", toggleTimer);
 el.skipBtn.addEventListener("click", () => {
+  playClick();
   // skipping a pomodoro does NOT count toward the streak
   if (mode === "pomodoro") { state.pomoSinceLong = (state.pomoSinceLong || 0) + 1; if (state.pomoSinceLong >= state.config.interval) state.pomoSinceLong = 0; save(); resetTimerTo(state.pomoSinceLong === 0 ? "long" : "short"); }
   else resetTimerTo("pomodoro");
   renderAll();
 });
 document.querySelectorAll(".mode-btn").forEach((b) =>
-  b.addEventListener("click", () => resetTimerTo(b.dataset.mode))
+  b.addEventListener("click", () => { playClick(); resetTimerTo(b.dataset.mode); })
 );
+document.getElementById("celBtn").addEventListener("click", () => {
+  document.getElementById("celebrate").classList.remove("open");
+});
 
 document.getElementById("addTask").addEventListener("click", () => {
   const name = prompt("Task name?");
@@ -860,9 +1060,31 @@ document.getElementById("resetBtn").addEventListener("click", () => {
 bindToggle("cfgAutoBreak", "autoBreak");
 bindToggle("cfgAutoPomo", "autoPomo");
 bindToggle("cfgSound", "sound");
+bindToggle("cfgClick", "click");
 bindToggle("cfgNotify", "notify", (on) => {
   if (on && typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
 });
+
+/* sound controls */
+(() => {
+  const alarmSel = document.getElementById("cfgAlarm");
+  alarmSel.value = state.config.alarm;
+  alarmSel.addEventListener("change", () => { state.config.alarm = alarmSel.value; save(); playAlarm(); });
+
+  const vol = document.getElementById("cfgVolume");
+  vol.value = Math.round((state.config.volume ?? 0.5) * 100);
+  vol.addEventListener("input", () => { state.config.volume = vol.value / 100; save(); });
+  vol.addEventListener("change", () => playClick());
+
+  const rep = document.getElementById("cfgRepeat");
+  rep.value = state.config.alarmRepeat || 1;
+  rep.addEventListener("change", () => {
+    state.config.alarmRepeat = Math.max(1, parseInt(rep.value) || 1);
+    rep.value = state.config.alarmRepeat; save();
+  });
+
+  document.getElementById("testSound").addEventListener("click", playAlarm);
+})();
 
 /* keyboard shortcuts */
 document.addEventListener("keydown", (e) => {
