@@ -6,6 +6,17 @@ in your own Google Drive.
 
 Live: https://nicolaspanozo-kh.github.io/nicofocus/
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/main.png" width="270" alt="Timer with daily streak strip and tasks" />
+  <img src="screenshots/profile.png" width="270" alt="Profile: streak, XP, weekly chart and activity heatmap" />
+</p>
+<p align="center">
+  <img src="screenshots/streak.png" width="270" alt="Daily streak celebration" />
+  <img src="screenshots/session.png" width="270" alt="Per-session completion reward" />
+</p>
+
 ## Project structure
 
 Three static files, no tooling - edit and push:
