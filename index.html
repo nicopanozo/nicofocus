@@ -822,7 +822,7 @@ let mode = "pomodoro";
 let running = false;
 let endAt = 0;        // timestamp ms when current run ends
 let remainingMs = 0;  // when paused
-let raf = null;
+let tickTimer = null;
 
 /* timer state is LOCAL only (a running timer shouldn't sync to other devices) */
 const TIMER_KEY = "nicofocus.timer";
@@ -842,7 +842,7 @@ function restoreTimer() {
     endAt = t.endAt; remainingMs = 0; running = true;
     el.startBtn.textContent = "Pause";
     el.skipBtn.classList.add("show");
-    tick();
+    startTicking();
   } else {
     // paused, or the session elapsed while the tab was closed -> stay paused
     running = false;
@@ -874,11 +874,19 @@ function renderTime() {
   document.title = (running ? txt + " · " : "") + (mode === "pomodoro" ? "Focus" : "Break") + " · nicofocus";
 }
 
-function tick() {
-  if (!running) return;
+/* Drive the countdown with a 1s interval instead of requestAnimationFrame.
+   rAF is paused in background tabs (freezing the tab-title countdown); setInterval
+   keeps running (throttled) so the title keeps ticking and the session still ends
+   close to on time when you're on another tab. A MM:SS display doesn't need 60fps. */
+function stopTicking() { if (tickTimer) { clearInterval(tickTimer); tickTimer = null; } }
+function tickOnce() {
   renderTime();
-  if (Date.now() >= endAt) { finishMode(); return; }
-  raf = requestAnimationFrame(tick);
+  if (running && Date.now() >= endAt) finishMode();
+}
+function startTicking() {
+  stopTicking();
+  tickOnce();                          // paint immediately, don't wait 1s
+  tickTimer = setInterval(tickOnce, 1000);
 }
 
 function startTimer() {
@@ -888,13 +896,13 @@ function startTimer() {
   el.startBtn.textContent = "Pause";
   el.skipBtn.classList.add("show");
   saveTimer();
-  tick();
+  startTicking();
 }
 function pauseTimer() {
   if (!running) return;
   remainingMs = currentRemaining();
   running = false;
-  cancelAnimationFrame(raf);
+  stopTicking();
   el.startBtn.textContent = "Start";
   saveTimer();
   renderTime();
@@ -902,7 +910,7 @@ function pauseTimer() {
 function toggleTimer() { playClick(); running ? pauseTimer() : startTimer(); }
 
 function resetTimerTo(m, autoStart = false) {
-  cancelAnimationFrame(raf);
+  stopTicking();
   running = false;
   mode = m;
   remainingMs = modeDurationMs(m);
@@ -915,7 +923,7 @@ function resetTimerTo(m, autoStart = false) {
 }
 
 function finishMode() {
-  cancelAnimationFrame(raf);
+  stopTicking();
   running = false;
   remainingMs = 0;
   if (state.config.sound) playAlarm();
@@ -1674,7 +1682,9 @@ document.addEventListener("keydown", (e) => {
    celebration that was deferred because the tab wasn't focused */
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  renderTime(); maybeFreeze();
+  if (running && Date.now() >= endAt) finishMode(); // elapsed during deep background throttle
+  else renderTime();
+  maybeFreeze();
   if (pendingCelebration) { const f = pendingCelebration; pendingCelebration = null; f(); }
 });
 /* if the day rolls over while the page is open, refresh the streak view */
