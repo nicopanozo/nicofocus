@@ -228,11 +228,12 @@
   .stat .cap { font-size: 12px; color: #999; font-weight: 600; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 
   .heat-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #999; font-weight: 700; margin-bottom: 12px; }
-  .heat { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 6px; }
-  .heat-col { display: flex; flex-direction: column; gap: 3px; }
+  .heat { display: flex; gap: 3px; padding-bottom: 6px; }
+  .heat-col { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .heat-col .heat-cell { width: 100%; height: auto; aspect-ratio: 1; }
   .heat-cell { width: 13px; height: 13px; border-radius: 3px; background: #ebedf0; }
   .heat-legend { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: #999; }
-  .heat-legend .heat-cell { width: 11px; height: 11px; }
+  .heat-legend .heat-cell { width: 11px; height: 11px; aspect-ratio: auto; flex: none; }
 
   .danger-zone { margin-top: 8px; border-top: 1px solid #eee; padding-top: 16px; }
   .link-btn { background: none; border: none; color: #c0392b; font-weight: 700; cursor: pointer; font-size: 13px; padding: 4px 0; }
@@ -320,7 +321,14 @@
   .chart-legend { display: flex; gap: 14px; font-size: 11px; color: #999; font-weight: 600; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
   .lg-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-  .chart { display: flex; align-items: flex-end; gap: 7px; height: 130px; margin: 10px 0 4px; }
+  .chart-row { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 4px; }
+  .chart-y { display: flex; flex-direction: column; justify-content: space-between; height: 130px; min-width: 26px; text-align: right; font-size: 10px; font-weight: 700; color: #bbb; }
+  .chart {
+    flex: 1; display: flex; align-items: flex-end; gap: 7px; height: 130px;
+    border-bottom: 1px solid #ececec;
+    background-image: linear-gradient(#f2f2f2 1px, transparent 1px);
+    background-size: 100% 65px; background-position: 0 0; background-repeat: repeat-y;
+  }
   .chart-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
   .chart-bars { display: flex; align-items: flex-end; gap: 3px; height: 100%; width: 100%; justify-content: center; }
   .chart-bars .bar { width: 42%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height 0.4s ease; }
@@ -607,7 +615,10 @@
           <button class="vt-btn" data-view="time">Time</button>
         </div>
       </div>
-      <div class="chart" id="chart"></div>
+      <div class="chart-row">
+        <div class="chart-y" id="chartY"></div>
+        <div class="chart" id="chart"></div>
+      </div>
       <div class="chart-legend" style="justify-content:flex-end;margin-bottom:18px">
         <span><i class="lg-dot" id="lgCur"></i>This week</span>
         <span><i class="lg-dot" style="background:#e0e0e0"></i>Last week</span>
@@ -1360,7 +1371,7 @@ function renderChart() {
   const fmtBar = (v) => viewIsTime() ? fmtHours(v) : (v + " XP");
   // build 7 rolling days, oldest -> today (left to right)
   const cols = [];
-  let max = 1;
+  let max = 0;
   for (let i = 6; i >= 0; i--) {
     const k = shiftDay(today, -i);
     const cur = valOn(k);
@@ -1369,18 +1380,31 @@ function renderChart() {
     const [y, m, d] = k.split("-").map(Number);
     cols.push({ k, cur, prev, label: narrow.format(new Date(y, m - 1, d)), isToday: k === today });
   }
+  // scale to a "nice" ceiling so bars are relative and the axis reads cleanly
+  const top = niceCeil(max);
+  // y-axis labels (top, mid, 0)
+  const axisLabel = (v) => viewIsTime() ? ((v >= 60 && v % 60 === 0) ? (v / 60) + "h" : v + "m") : v;
+  document.getElementById("chartY").innerHTML =
+    `<span>${axisLabel(top)}</span><span>${axisLabel(top / 2)}</span><span>0</span>`;
   cols.forEach((c) => {
     const col = document.createElement("div");
     col.className = "chart-col";
     col.innerHTML = `
       <div class="chart-bars">
-        <div class="bar cur" style="height:${(c.cur / max) * 100}%" title="${fmtBar(c.cur)} this week"></div>
-        <div class="bar prev" style="height:${(c.prev / max) * 100}%" title="${fmtBar(c.prev)} last week"></div>
+        <div class="bar cur" style="height:${(c.cur / top) * 100}%" title="${fmtBar(c.cur)} this week"></div>
+        <div class="bar prev" style="height:${(c.prev / top) * 100}%" title="${fmtBar(c.prev)} last week"></div>
       </div>
       <div class="chart-lbl${c.isToday ? " today" : ""}">${c.label}</div>`;
     col.querySelector(".bar.cur").style.background = `rgb(${state.config.color})`;
     chart.appendChild(col);
   });
+}
+/* round up to a clean axis ceiling: 1,2,2.5,5,10 x 10^n */
+function niceCeil(n) {
+  if (n <= 0) return 10;
+  const pow = Math.pow(10, Math.floor(Math.log10(n)));
+  for (const s of [1, 2, 3, 5, 10]) if (n <= s * pow) return s * pow;
+  return 10 * pow;
 }
 
 /* toast + freeze purchase */
