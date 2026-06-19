@@ -332,10 +332,44 @@
   .week-focus b { color: #333; }
 
   /* gems + freezes row */
-  .gem-row { display: flex; align-items: center; gap: 14px; background: #f5f5f5; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 14px; color: #555; font-weight: 600; }
-  .gem-item b { color: #222; font-size: 16px; }
-  .gem-row .btn-soft { margin-left: auto; }
+  .gem-row { display: flex; align-items: center; gap: 12px; background: #f5f5f5; border-radius: 10px; padding: 12px 14px; margin-bottom: 20px; font-size: 13px; color: #888; font-weight: 600; }
+  .gem-item { display: inline-flex; align-items: center; gap: 6px; }
+  .gem-item .gem-ico { font-size: 17px; }
+  .gem-item b { color: #222; font-size: 17px; }
+  .gem-item .gem-cap { color: #999; }
+  .gem-sep { width: 1px; align-self: stretch; background: #e0e0e0; }
+  .gem-row .btn-soft { margin-left: auto; white-space: nowrap; }
   .gem-row .btn-soft:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* today's XP chip in the sessions card */
+  .today-xp { font-size: 12px; font-weight: 700; color: var(--ink-dim); background: rgba(0,0,0,0.14); padding: 2px 8px; border-radius: 999px; margin-right: 10px; }
+
+  /* ---- per-session "Session complete!" screen ---- */
+  .session-done {
+    position: fixed; inset: 0; background: var(--bg); color: var(--ink);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; z-index: 200; padding: 24px;
+  }
+  .session-done.open { display: flex; }
+  .sd-burst { position: relative; width: 140px; height: 140px; display: flex; align-items: center; justify-content: center; }
+  .sd-emoji { font-size: 84px; line-height: 1; transform: scale(0); display: inline-block; }
+  .session-done.open .sd-emoji { animation: flamePop 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) forwards; }
+  .sd-burst::before { content: ""; position: absolute; inset: -10px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 65%); transform: scale(0); }
+  .session-done.open .sd-burst::before { animation: flamePop 0.6s ease forwards; }
+  .sd-title { font-size: 30px; font-weight: 800; margin: 10px 0 26px; }
+  .sd-cards { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .sd-card { background: rgba(0,0,0,0.16); border-radius: 14px; padding: 14px 8px; min-width: 92px; flex: 1; max-width: 120px;
+    opacity: 0; transform: translateY(14px); transition: opacity 0.35s, transform 0.35s; border: 2px solid rgba(255,255,255,0.18); }
+  .sd-card.in { opacity: 1; transform: translateY(0); }
+  .sd-card .sd-cap { font-size: 11px; font-weight: 800; letter-spacing: 1px; opacity: 0.8; text-transform: uppercase; }
+  .sd-card .sd-val { font-size: 26px; font-weight: 800; margin-top: 6px; }
+  .sd-card.xp .sd-val { color: #ffd84a; }
+  .session-done .cel-btn { margin-top: 34px; }
+  @media (prefers-reduced-motion: reduce) {
+    .session-done.open .sd-emoji, .session-done.open .sd-burst::before { animation: none; transform: scale(1); }
+    .sd-card { transition: none; }
+  }
 
   /* weekly headline (XP earned card) */
   .week-headline { text-align: center; padding: 8px 0 18px; border-bottom: 1px solid #eee; margin-bottom: 18px; }
@@ -422,7 +456,7 @@
   <div class="today-card">
     <div class="today-head">
       <span class="label">Today's sessions</span>
-      <span class="val"><span id="todayCount">0</span> / <span id="goalCount">4</span></span>
+      <span class="val"><span class="today-xp">⚡ <span id="todayXp">0</span> XP</span><span id="todayCount">0</span> / <span id="goalCount">4</span></span>
     </div>
     <div class="bar"><div id="todayBar" style="width:0%"></div></div>
     <div class="goal-done" id="goalMsg"></div>
@@ -531,6 +565,7 @@
         <div class="g-title">🧪 Testing (local only)</div>
         <div class="hint" style="margin-top:0;margin-bottom:10px">Only shows on localhost / file. Hidden on your live site so real milestones stay a surprise.</div>
         <div class="row-btns">
+          <button class="btn-soft" id="testSession">Test session</button>
           <button class="btn-soft" id="testStreak">Test streak</button>
           <button class="btn-soft" id="testMilestone">Test milestone (100)</button>
         </div>
@@ -553,9 +588,10 @@
       </div>
 
       <div class="gem-row">
-        <span class="gem-item">💎 <b id="rGems">0</b></span>
-        <span class="gem-item">🧊 <b id="rFreezes">0</b>/2</span>
-        <button class="btn-soft" id="buyFreeze">Buy freeze (15 💎)</button>
+        <span class="gem-item" title="Earn gems by focusing"><span class="gem-ico">💎</span><b id="rGems">0</b><span class="gem-cap">gems</span></span>
+        <span class="gem-sep"></span>
+        <span class="gem-item" title="Auto-used to save your streak on a missed work day"><span class="gem-ico">🧊</span><b id="rFreezes">0</b><span class="gem-cap">of 2 freezes</span></span>
+        <button class="btn-soft" id="buyFreeze">Buy freeze · 15 💎</button>
       </div>
 
       <div class="week-headline">
@@ -595,6 +631,18 @@
   </div>
 </div>
 
+<!-- Per-session completion -->
+<div class="session-done" id="sessionDone" hidden>
+  <div class="sd-burst"><span class="sd-emoji">🍅</span></div>
+  <div class="sd-title">Session complete!</div>
+  <div class="sd-cards">
+    <div class="sd-card xp"><div class="sd-cap">XP</div><div class="sd-val" id="sdXp">+0</div></div>
+    <div class="sd-card time"><div class="sd-cap">Focus</div><div class="sd-val" id="sdTime">0m</div></div>
+    <div class="sd-card today"><div class="sd-cap">Today</div><div class="sd-val" id="sdToday">0</div></div>
+  </div>
+  <button class="cel-btn" id="sdBtn">Continue</button>
+</div>
+
 <!-- Streak celebration -->
 <div class="celebrate" id="celebrate" hidden>
   <div class="cel-badge" id="celBadge" style="display:none">🏆 MILESTONE</div>
@@ -629,7 +677,8 @@ const DEFAULTS = {
     restWeekends: false, chartView: "xp",
   },
   history: {},     // "YYYY-MM-DD": sessionCount
-  minutes: {},     // "YYYY-MM-DD": focus minutes (XP == minutes)
+  minutes: {},     // "YYYY-MM-DD": focus minutes
+  xpByDay: {},     // "YYYY-MM-DD": gamified XP earned that day
   tasks: [],
   activeTask: null,
   pomoSinceLong: 0,
@@ -862,39 +911,80 @@ function finishMode() {
   notify(mode === "pomodoro" ? "Focus session done! Take a break." : "Break over, back to focus.");
 
   if (mode === "pomodoro") {
-    recordSession();
+    const result = recordSession();
     state.pomoSinceLong = (state.pomoSinceLong || 0) + 1;
     const nextLong = state.pomoSinceLong >= state.config.interval;
     if (nextLong) state.pomoSinceLong = 0;
     save();
     resetTimerTo(nextLong ? "long" : "short", state.config.autoBreak);
+    renderAll();
+    celebrateSession(result);
   } else {
     resetTimerTo("pomodoro", state.config.autoPomo);
+    renderAll();
   }
-  renderAll();
 }
 
-/* record one finished pomodoro */
+/* XP is gamified, NOT just minutes: a flat completion reward + effort (minutes) +
+   a momentum bonus so each additional session that day is worth a little more. */
+const XP_BASE = 10, XP_PER_MIN = 1, XP_MOMENTUM = 5;
+
+/* record one finished pomodoro; returns a summary for the completion animation */
 function recordSession() {
   const k = dayKey();
   const prevStreak = computeStreak().streak;
   state.history[k] = (state.history[k] || 0) + 1;
-  state.minutes[k] = (state.minutes[k] || 0) + state.config.pomodoro;
+  const todayCount = state.history[k];
+  const minutes = state.config.pomodoro;
+  state.minutes[k] = (state.minutes[k] || 0) + minutes;
+  const xp = XP_BASE + minutes * XP_PER_MIN + XP_MOMENTUM * todayCount;
+  state.xpByDay[k] = (state.xpByDay[k] || 0) + xp;
   // earn gems: 1 per session, +3 bonus the moment you hit the daily goal
   state.gems = (state.gems || 0) + 1;
-  if (state.history[k] === state.config.goal) state.gems += 3;
+  if (todayCount === state.config.goal) state.gems += 3;
   // bump active task
   if (state.activeTask != null) {
     const t = state.tasks.find((t) => t.id === state.activeTask);
     if (t) t.done = (t.done || 0) + 1;
   }
   save();
-  // celebrate the moment the streak grows: the first session of the day
   const newStreak = computeStreak().streak;
-  if (newStreak > prevStreak) {
-    notify(`Streak extended! 🔥 ${newStreak}-day streak.`);
-    celebrate(prevStreak, newStreak, isMilestone(newStreak));
-  }
+  const streakGrew = newStreak > prevStreak;
+  if (streakGrew) notify(`Streak extended! 🔥 ${newStreak}-day streak.`);
+  return { xp, minutes, todayCount, prevStreak, newStreak, streakGrew, milestone: streakGrew && isMilestone(newStreak) };
+}
+
+/* show the per-session "Session complete!" screen, then the streak celebration if the
+   streak grew. Deferred until the tab is focused so you actually see the dopamine hit. */
+let pendingCelebration = null;
+function runOrQueueCelebration(fn) {
+  if (document.hidden) pendingCelebration = fn;
+  else fn();
+}
+function celebrateSession(result) {
+  runOrQueueCelebration(() => {
+    showSessionComplete(result, () => {
+      if (result.streakGrew) celebrate(result.prevStreak, result.newStreak, result.milestone);
+    });
+  });
+}
+function showSessionComplete(result, onContinue) {
+  const sd = document.getElementById("sessionDone");
+  document.getElementById("sdXp").textContent = "+" + result.xp;
+  document.getElementById("sdTime").textContent = result.minutes + "m";
+  document.getElementById("sdToday").textContent = result.todayCount;
+  const cards = sd.querySelectorAll(".sd-card");
+  cards.forEach((c) => c.classList.remove("in"));
+  sd.hidden = false;
+  sd.classList.add("open");
+  playSessionSound();
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) cards.forEach((c) => c.classList.add("in"));
+  else cards.forEach((c, i) => setTimeout(() => c.classList.add("in"), 480 + i * 130));
+  document.getElementById("sdBtn").onclick = () => {
+    sd.classList.remove("open"); sd.hidden = true;
+    if (onContinue) onContinue();
+  };
 }
 
 /* milestone days get the bigger celebration */
@@ -955,6 +1045,13 @@ function playStreakSound() {
     const v = state.config.volume ?? 0.5;
     if (v <= 0) return;
     [[523, 0], [659, 0.12], [784, 0.24], [1047, 0.4]].forEach(([f, s]) => blip(f, s, 0.45, "triangle", v * 0.5));
+  } catch (e) { /* ignore */ }
+}
+function playSessionSound() {
+  try {
+    const v = state.config.volume ?? 0.5;
+    if (v <= 0) return;
+    [[659, 0], [988, 0.11]].forEach(([f, s]) => blip(f, s, 0.32, "triangle", v * 0.38));
   } catch (e) { /* ignore */ }
 }
 function playMilestoneSound() {
@@ -1157,6 +1254,7 @@ function renderAll() {
   el.goalCount.textContent = goal;
   el.todayBar.style.width = Math.min(100, (today / goal) * 100) + "%";
   el.goalMsg.textContent = dailyMessage(today, goal);
+  document.getElementById("todayXp").textContent = state.xpByDay[dayKey()] || 0;
 
   el.roundCounter.textContent = "#" + ((state.pomoSinceLong || 0) % state.config.interval + 1);
   renderWeek(document.getElementById("weekStrip"));
@@ -1192,20 +1290,29 @@ function renderTasks() {
 }
 
 /* ---------------- profile ---------------- */
-/* XP equals focus minutes: a longer session is worth more. */
-function xpOn(key) { return state.minutes[key] || 0; }
+function xpOn(key) { return state.xpByDay[key] || 0; }   // gamified XP that day
+function minOn(key) { return state.minutes[key] || 0; }  // focus minutes that day
+function valOn(key) { return viewIsTime() ? minOn(key) : xpOn(key); }
+function totalXp() { return Object.values(state.xpByDay).reduce((a, b) => a + b, 0); }
+function totalMinutes() { return Object.values(state.minutes).reduce((a, b) => a + b, 0); }
 function fmtHours(min) {
   const h = Math.floor(min / 60), m = Math.round(min % 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 function viewIsTime() { return state.config.chartView === "time"; }
-/* format one value in the active unit */
-function fmtVal(min) { return viewIsTime() ? fmtHours(min) : min.toLocaleString() + " XP"; }
+/* fill XP for days that predate the XP system (idempotent, safe across sync) */
+function fillXpFromMinutes() {
+  let changed = false;
+  for (const d in state.minutes) {
+    if (state.xpByDay[d] == null) { state.xpByDay[d] = state.minutes[d]; changed = true; }
+  }
+  if (changed) persistLocalOnly();
+}
 
 function weekTotals() {
   const today = dayKey();
   let week = 0, prev = 0;
-  for (let i = 0; i < 7; i++) { week += xpOn(shiftDay(today, -i)); prev += xpOn(shiftDay(today, -i - 7)); }
+  for (let i = 0; i < 7; i++) { week += valOn(shiftDay(today, -i)); prev += valOn(shiftDay(today, -i - 7)); }
   return { week, prev };
 }
 
@@ -1213,15 +1320,13 @@ function openReport() {
   const { streak } = computeStreak();
   document.getElementById("rStreak").textContent = streak;
   document.getElementById("rBest").textContent = Math.max(computeBest(), streak);
-
-  const totalMin = Object.values(state.minutes).reduce((a, b) => a + b, 0);
-  document.getElementById("rXp").textContent = totalMin.toLocaleString();
-  document.getElementById("rTotalFocus").textContent = fmtHours(totalMin);
+  document.getElementById("rXp").textContent = totalXp().toLocaleString();
+  document.getElementById("rTotalFocus").textContent = fmtHours(totalMinutes());
   document.getElementById("rGems").textContent = state.gems || 0;
-  document.getElementById("rFreezes").textContent = (state.freezes || 0) + "/" + MAX_FREEZES;
+  document.getElementById("rFreezes").textContent = state.freezes || 0;
 
   const buy = document.getElementById("buyFreeze");
-  buy.textContent = `Buy freeze (${FREEZE_COST} 💎)`;
+  buy.textContent = `Buy freeze · ${FREEZE_COST} 💎`;
   buy.disabled = (state.gems || 0) < FREEZE_COST || (state.freezes || 0) >= MAX_FREEZES;
 
   // weekly headline (this rolling week vs last)
@@ -1252,15 +1357,14 @@ function renderChart() {
   document.getElementById("lgCur").style.background = `rgb(${state.config.color})`;
   const today = dayKey();
   const narrow = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
-  const unit = viewIsTime() ? "" : " XP";
-  const fmtBar = (min) => viewIsTime() ? fmtHours(min) : (min + " XP");
+  const fmtBar = (v) => viewIsTime() ? fmtHours(v) : (v + " XP");
   // build 7 rolling days, oldest -> today (left to right)
   const cols = [];
   let max = 1;
   for (let i = 6; i >= 0; i--) {
     const k = shiftDay(today, -i);
-    const cur = xpOn(k);
-    const prev = xpOn(shiftDay(k, -7));
+    const cur = valOn(k);
+    const prev = valOn(shiftDay(k, -7));
     max = Math.max(max, cur, prev);
     const [y, m, d] = k.split("-").map(Number);
     cols.push({ k, cur, prev, label: narrow.format(new Date(y, m - 1, d)), isToday: k === today });
@@ -1542,8 +1646,13 @@ document.addEventListener("keydown", (e) => {
   else if (k === "r") openReport();
 });
 
-/* recompute time when tab regains focus (handles long sleeps) */
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { renderTime(); maybeFreeze(); } });
+/* recompute time when tab regains focus (handles long sleeps), and fire any
+   celebration that was deferred because the tab wasn't focused */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  renderTime(); maybeFreeze();
+  if (pendingCelebration) { const f = pendingCelebration; pendingCelebration = null; f(); }
+});
 /* if the day rolls over while the page is open, refresh the streak view */
 let lastDay = dayKey();
 setInterval(() => { const d = dayKey(); if (d !== lastDay) { lastDay = d; maybeFreeze(); renderAll(); } }, 60 * 1000);
@@ -1706,6 +1815,7 @@ function mergeDocs(local, remote) {
     config: { ...DEFAULTS.config, ...(cfgNewer.config || {}) },
     history: mergeMax(local.history, remote.history),
     minutes: mergeMax(local.minutes, remote.minutes),
+    xpByDay: mergeMax(local.xpByDay, remote.xpByDay),
     frozenDays: mergeTrue(local.frozenDays, remote.frozenDays),
     tasks: newer.tasks || [],
     activeTask: newer.activeTask ?? null,
@@ -1729,6 +1839,7 @@ async function pullAndMerge() {
     const timerWasFresh = !running && Math.abs(remainingMs - modeDurationMs()) < 1500;
     state = mergeDocs(state, remote);
     ensureJoined();
+    fillXpFromMinutes();
     applyFreezes();
     persistLocalOnly();
     syncSettingsUI();
@@ -1798,6 +1909,10 @@ function isDev() {
 }
 if (isDev()) {
   document.getElementById("devGroup").style.display = "";
+  document.getElementById("testSession").addEventListener("click", () => {
+    document.querySelectorAll(".overlay").forEach((o) => { o.classList.remove("open"); o.hidden = true; });
+    showSessionComplete({ xp: 65, minutes: 45, todayCount: 2 }, () => {});
+  });
   document.getElementById("testStreak").addEventListener("click", () => {
     const s = computeStreak().streak;
     celebrate(s, s + 1, false);
@@ -1807,6 +1922,7 @@ if (isDev()) {
 
 /* ---------------- boot ---------------- */
 ensureJoined();
+fillXpFromMinutes();
 buildSwatches();
 if (!restoreTimer()) resetTimerTo("pomodoro");
 maybeFreeze();
