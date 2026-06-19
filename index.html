@@ -1565,8 +1565,9 @@ function maybeFreeze() {
 /* Offline-first: localStorage is always the live store. Drive is a sync layer on
    top. The app fully works signed out; sync just mirrors a private nicofocus.json
    into a hidden per-app folder in YOUR Google Drive (drive.appdata scope only). */
-let tokenClient = null, accessToken = null, driveFileId = null;
+let tokenClient = null, accessToken = null, driveFileId = null, tokenExpiry = 0;
 let signedIn = false, syncing = false, lastSyncAt = 0, pushTimer = null;
+const TOKEN_KEY = "nicofocus.token", TOKEN_EXP_KEY = "nicofocus.tokenExp";
 
 function getClientId() {
   return GOOGLE_CLIENT_ID || (localStorage.getItem("nicofocus.gclient") || "").trim();
@@ -1582,6 +1583,16 @@ function initSync() {
   updateSyncUI();
   const cid = getClientId();
   if (!cid) return;
+  // 1) reuse a still-valid token from a previous session: sync immediately, NO popup.
+  //    (A bearer token works without cookies, so this also sidesteps Safari's
+  //    third-party-cookie block that makes silent re-auth fail on iOS.)
+  const tok = localStorage.getItem(TOKEN_KEY);
+  const exp = parseInt(localStorage.getItem(TOKEN_EXP_KEY) || "0", 10);
+  if (tok && exp > Date.now() + 60000) {
+    accessToken = tok; tokenExpiry = exp; signedIn = true;
+    updateSyncUI();
+    pullAndMerge().catch((e) => console.warn("sync on load failed", e));
+  }
   waitForGsi(() => {
     try {
       tokenClient = google.accounts.oauth2.initTokenClient({
@@ -1590,8 +1601,8 @@ function initSync() {
         callback: onToken,
         error_callback: (e) => { console.warn("auth error", e); syncing = false; updateSyncUI(); },
       });
-      // silently restore the session if this browser connected before
-      if (localStorage.getItem("nicofocus.connected") === "1") connectGoogle(false);
+      // 2) no valid token but connected before -> try a SILENT renew (no popup if it works)
+      if (!signedIn && localStorage.getItem("nicofocus.connected") === "1") connectGoogle(false);
     } catch (e) { console.warn("initTokenClient failed", e); }
   });
 }
@@ -1607,11 +1618,15 @@ function connectGoogle(interactive) {
   catch (e) { console.warn(e); }
 }
 
+function clearToken() {
+  accessToken = null; tokenExpiry = 0; signedIn = false; driveFileId = null;
+  try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_EXP_KEY); } catch (e) {}
+}
 function disconnectGoogle() {
   if (accessToken && window.google && google.accounts && google.accounts.oauth2) {
     try { google.accounts.oauth2.revoke(accessToken); } catch (e) {}
   }
-  signedIn = false; accessToken = null; driveFileId = null;
+  clearToken();
   localStorage.removeItem("nicofocus.connected");
   updateSyncUI();
 }
@@ -1619,8 +1634,13 @@ function disconnectGoogle() {
 async function onToken(resp) {
   if (!resp || !resp.access_token) { syncing = false; updateSyncUI(); return; }
   accessToken = resp.access_token;
+  tokenExpiry = Date.now() + (parseInt(resp.expires_in, 10) || 3600) * 1000;
   signedIn = true;
-  localStorage.setItem("nicofocus.connected", "1");
+  try {
+    localStorage.setItem(TOKEN_KEY, accessToken);
+    localStorage.setItem(TOKEN_EXP_KEY, String(tokenExpiry));
+    localStorage.setItem("nicofocus.connected", "1");
+  } catch (e) {}
   updateSyncUI();
   try { await pullAndMerge(); }
   catch (e) { console.warn("initial sync failed", e); syncing = false; updateSyncUI(); }
@@ -1631,8 +1651,9 @@ async function driveFetch(url, opts = {}) {
     ...opts,
     headers: { Authorization: "Bearer " + accessToken, ...(opts.headers || {}) },
   });
-  if (res.status === 401) { // token expired -> drop and re-auth silently
-    signedIn = false; updateSyncUI(); connectGoogle(false);
+  if (res.status === 401) { // token invalid/expired -> drop it and try a silent renew
+    clearToken(); updateSyncUI();
+    if (localStorage.getItem("nicofocus.connected") === "1") connectGoogle(false);
     throw new Error("token expired");
   }
   return res;
@@ -1740,14 +1761,17 @@ function updateSyncUI() {
   const label = document.getElementById("syncLabel");
   const status = document.getElementById("syncStatus");
   const connectBtn = document.getElementById("connectBtn");
-  if (label) label.textContent = signedIn ? (syncing ? "Syncing…" : "Synced") : "Sync";
-  if (connectBtn) connectBtn.textContent = signedIn ? "Disconnect" : "Connect";
+  const wasConnected = localStorage.getItem("nicofocus.connected") === "1";
+  if (label) label.textContent = signedIn ? (syncing ? "Syncing…" : "Synced") : (wasConnected ? "Reconnect" : "Sync");
+  if (connectBtn) connectBtn.textContent = signedIn ? "Disconnect" : (wasConnected ? "Reconnect" : "Connect");
   if (status) {
     status.textContent = !getClientId()
       ? "Add your Google OAuth Client ID below to enable cross-device sync."
       : signedIn
         ? (syncing ? "Syncing with Google Drive…" : "Connected. Your data syncs to a private folder in your Google Drive.")
-        : "Not connected. Tap Connect to sync this browser across devices.";
+        : wasConnected
+          ? "Session expired (Google sign-ins last about an hour). Tap Reconnect to sync again."
+          : "Not connected. Tap Connect to sync this browser across devices.";
   }
 }
 
