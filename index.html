@@ -718,6 +718,36 @@ let endAt = 0;        // timestamp ms when current run ends
 let remainingMs = 0;  // when paused
 let raf = null;
 
+/* timer state is LOCAL only (a running timer shouldn't sync to other devices) */
+const TIMER_KEY = "nicofocus.timer";
+function saveTimer() {
+  try { localStorage.setItem(TIMER_KEY, JSON.stringify({ mode, running, endAt, remainingMs })); }
+  catch (e) { /* ignore */ }
+}
+/* restore the timer across a refresh. Returns true if a state was restored. */
+function restoreTimer() {
+  let t;
+  try { t = JSON.parse(localStorage.getItem(TIMER_KEY) || "null"); } catch (e) { t = null; }
+  if (!t || !MODES[t.mode]) return false;
+  mode = t.mode;
+  applyMode();
+  if (t.running && t.endAt > Date.now()) {
+    // still mid-session: resume counting from the original end time
+    endAt = t.endAt; remainingMs = 0; running = true;
+    el.startBtn.textContent = "Pause";
+    el.skipBtn.classList.add("show");
+    tick();
+  } else {
+    // paused, or the session elapsed while the tab was closed -> stay paused
+    running = false;
+    remainingMs = (t.running || !(t.remainingMs > 0)) ? modeDurationMs(mode) : t.remainingMs;
+    el.startBtn.textContent = "Start";
+    el.skipBtn.classList.toggle("show", remainingMs < modeDurationMs(mode));
+    renderTime();
+  }
+  return true;
+}
+
 function modeDurationMs(m = mode) {
   const mins = m === "pomodoro" ? state.config.pomodoro : m === "short" ? state.config.short : state.config.long;
   return Math.max(1, mins) * 60 * 1000;
@@ -751,6 +781,7 @@ function startTimer() {
   endAt = Date.now() + (remainingMs || modeDurationMs());
   el.startBtn.textContent = "Pause";
   el.skipBtn.classList.add("show");
+  saveTimer();
   tick();
 }
 function pauseTimer() {
@@ -759,6 +790,7 @@ function pauseTimer() {
   running = false;
   cancelAnimationFrame(raf);
   el.startBtn.textContent = "Start";
+  saveTimer();
   renderTime();
 }
 function toggleTimer() { playClick(); running ? pauseTimer() : startTimer(); }
@@ -773,6 +805,7 @@ function resetTimerTo(m, autoStart = false) {
   el.startBtn.textContent = "Start";
   el.skipBtn.classList.remove("show");
   if (autoStart) startTimer();
+  else saveTimer();
 }
 
 function finishMode() {
@@ -1383,6 +1416,7 @@ document.getElementById("importFile").addEventListener("change", (e) => { if (e.
 document.getElementById("resetBtn").addEventListener("click", () => {
   if (confirm("Erase ALL sessions, streak and tasks? This cannot be undone.")) {
     state = structuredClone(DEFAULTS); ensureJoined(); save();
+    try { localStorage.removeItem(TIMER_KEY); } catch (e) {}
     resetTimerTo("pomodoro"); renderAll(); syncSettingsUI();
     document.querySelectorAll(".overlay").forEach((o) => o.classList.remove("open"));
   }
@@ -1602,12 +1636,14 @@ async function pullAndMerge() {
   if (f) {
     driveFileId = f.id;
     const remote = await driveReadFile(f.id);
+    // only adopt a new timer length if the timer is fresh (not mid-session/paused)
+    const timerWasFresh = !running && Math.abs(remainingMs - modeDurationMs()) < 1500;
     state = mergeDocs(state, remote);
     ensureJoined();
     applyFreezes();
     persistLocalOnly();
     syncSettingsUI();
-    if (!running) remainingMs = modeDurationMs();
+    if (timerWasFresh) remainingMs = modeDurationMs();
     applyMode(); renderTime(); renderAll(); buildSwatches();
     await driveUpdateFile(driveFileId, state); // converge remote to the merged copy
   } else {
@@ -1680,7 +1716,7 @@ if (isDev()) {
 /* ---------------- boot ---------------- */
 ensureJoined();
 buildSwatches();
-resetTimerTo("pomodoro");
+if (!restoreTimer()) resetTimerTo("pomodoro");
 maybeFreeze();
 renderAll();
 initSync();
