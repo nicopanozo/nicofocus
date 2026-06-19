@@ -245,22 +245,25 @@
   input[type="range"] { accent-color: #45474b; }
 
   /* ---- weekday streak strip ---- */
-  .weekstrip { display: flex; justify-content: space-between; gap: 6px; margin-top: 16px; }
-  .wday { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
-  .wday .lbl { font-size: 11px; opacity: 0.7; font-weight: 800; }
+  .weekstrip { display: flex; justify-content: space-between; gap: 6px; margin-top: 18px; }
+  .wday { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; background: none; }
+  .wday .lbl { font-size: 11px; opacity: 0.65; font-weight: 800; letter-spacing: 0.5px; }
   .wday .ring {
     width: 30px; height: 30px; border-radius: 50%;
-    background: rgba(0, 0, 0, 0.18);
+    background: rgba(255, 255, 255, 0.16);
     display: flex; align-items: center; justify-content: center; position: relative;
+    transition: background 0.2s;
   }
-  .wday.future .ring { opacity: 0.5; }
+  .wday.future .ring { background: rgba(255, 255, 255, 0.07); }
   .wday.done .ring { background: var(--ink); }
   .wday.done .ring::after {
     content: ""; width: 6px; height: 11px;
     border: solid var(--bg); border-width: 0 2.5px 2.5px 0;
     transform: rotate(45deg); margin-top: -2px;
   }
-  .wday.today .ring { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55); }
+  /* crisp gapped ring on today: bg-colored inner shadow makes the gap */
+  .wday.today .lbl { opacity: 1; }
+  .wday.today .ring { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px rgba(255, 255, 255, 0.9); }
 
   /* ---- streak celebration ---- */
   .celebrate {
@@ -473,7 +476,7 @@ const KEY = "nicofocus.v1";
 
 /* Optional: bake your Google OAuth Client ID here to enable Drive sync on every
    device without re-entering it. Leave "" to set it per-browser via Settings → Sync. */
-const GOOGLE_CLIENT_ID = "";
+const GOOGLE_CLIENT_ID = "980514183334-bp2bu8k44eegq6sh48h0grhqlnnhs34j.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE_FILE = "nicofocus.json";
 
@@ -584,7 +587,7 @@ function renderTime() {
   const ms = currentRemaining();
   const txt = fmt(ms);
   el.time.textContent = txt;
-  document.title = (running ? txt + " — " : "") + (mode === "pomodoro" ? "Focus" : "Break") + " · nicofocus";
+  document.title = (running ? txt + " · " : "") + (mode === "pomodoro" ? "Focus" : "Break") + " · nicofocus";
 }
 
 function tick() {
@@ -629,7 +632,7 @@ function finishMode() {
   running = false;
   remainingMs = 0;
   if (state.config.sound) playAlarm();
-  notify(mode === "pomodoro" ? "Focus session done! Take a break." : "Break over — back to focus.");
+  notify(mode === "pomodoro" ? "Focus session done! Take a break." : "Break over, back to focus.");
 
   if (mode === "pomodoro") {
     recordSession();
@@ -843,6 +846,38 @@ function applyMode() {
   el.focusMsg.textContent = MODES[mode].label;
 }
 
+/* ---------------- daily message ---------------- */
+/* stable per calendar day, rotates each day */
+function dayNumber() {
+  const d = new Date();
+  return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
+}
+const DONE_MSGS = [
+  "Goal reached: streak safe today! 🔥",
+  "Nailed it. Today's locked in. 🔥",
+  "That's a wrap: streak protected! 💪",
+  "Done and dusted. Your future self says thanks. ✨",
+  "Goal smashed. Momentum is yours. 🚀",
+  "Another day in the books. Keep the chain alive! ⛓️",
+  "Focus delivered, streak secured. 🔥",
+  "You showed up today. That's the whole game. 🌱",
+];
+const TODO_MSGS = [
+  "{n} more to keep your streak alive.",
+  "Just {n} to go: don't break the chain. ⛓️",
+  "{n} session{s} between you and a safe streak.",
+  "Almost there: {n} more focus block{s}.",
+  "{n} more and today counts. You've got this. 💪",
+  "Start small: {n} session{s} left today.",
+  "Protect the streak, {n} to go. 🔥",
+  "Future you is rooting for {n} more. ✨",
+];
+function dailyMessage(remaining) {
+  if (remaining <= 0) return DONE_MSGS[dayNumber() % DONE_MSGS.length];
+  const tpl = TODO_MSGS[dayNumber() % TODO_MSGS.length];
+  return tpl.replace("{n}", remaining).replace("{s}", remaining === 1 ? "" : "s");
+}
+
 /* ---------------- render ---------------- */
 function renderAll() {
   const { streak, atRisk } = computeStreak();
@@ -854,9 +889,7 @@ function renderAll() {
   el.todayCount.textContent = today;
   el.goalCount.textContent = goal;
   el.todayBar.style.width = Math.min(100, (today / goal) * 100) + "%";
-  el.goalMsg.textContent =
-    today >= goal ? `Goal reached — streak safe today! 🔥` :
-    `${goal - today} more to keep your streak.`;
+  el.goalMsg.textContent = dailyMessage(goal - today);
 
   el.roundCounter.textContent = "#" + ((state.pomoSinceLong || 0) % state.config.interval + 1);
   renderWeek(document.getElementById("weekStrip"));
@@ -1273,7 +1306,7 @@ function updateSyncUI() {
     status.textContent = !getClientId()
       ? "Add your Google OAuth Client ID below to enable cross-device sync."
       : signedIn
-        ? (syncing ? "Syncing with Google Drive…" : "Connected — your data syncs to a private folder in your Google Drive.")
+        ? (syncing ? "Syncing with Google Drive…" : "Connected. Your data syncs to a private folder in your Google Drive.")
         : "Not connected. Tap Connect to sync this browser across devices.";
   }
 }
