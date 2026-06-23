@@ -346,21 +346,45 @@ function celebrateSession(result) {
 }
 function showSessionComplete(result, onContinue) {
   const sd = document.getElementById("sessionDone");
-  document.getElementById("sdXp").textContent = "+" + result.xp;
+  const xpEl = document.getElementById("sdXp");
+  const btn = document.getElementById("sdBtn");
+  xpEl.textContent = "+0";
   document.getElementById("sdTime").textContent = result.minutes + "m";
   document.getElementById("sdToday").textContent = result.todayCount;
   const cards = sd.querySelectorAll(".sd-card");
   cards.forEach((c) => c.classList.remove("in"));
+  btn.classList.remove("show");
   sd.hidden = false;
   sd.classList.add("open");
   playSessionSound();
-  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduce) cards.forEach((c) => c.classList.add("in"));
-  else cards.forEach((c, i) => setTimeout(() => c.classList.add("in"), 480 + i * 130));
-  document.getElementById("sdBtn").onclick = () => {
+
+  // Single dismiss path, reachable by button, Enter/Esc/Space, or clicking the backdrop.
+  let dismissed = false;
+  const finish = () => {
+    if (dismissed) return;
+    dismissed = true;
+    document.removeEventListener("keydown", onKey);
     sd.classList.remove("open"); sd.hidden = true;
     if (onContinue) onContinue();
   };
+  const onKey = (e) => {
+    if (e.key === "Enter" || e.key === "Escape" || e.key === " ") { e.preventDefault(); finish(); }
+  };
+  btn.onclick = finish;
+  sd.onclick = (e) => { if (e.target === sd) finish(); };
+  document.addEventListener("keydown", onKey);
+
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) {
+    cards.forEach((c) => c.classList.add("in"));
+    xpEl.textContent = "+" + result.xp;
+    btn.classList.add("show");
+    return;
+  }
+  cards.forEach((c, i) => setTimeout(() => c.classList.add("in"), 480 + i * 130));
+  setTimeout(() => countUp(xpEl, 0, result.xp, 600, "+"), 540);
+  // Reveal Continue once the last card has settled, so the screen never dead-ends.
+  setTimeout(() => btn.classList.add("show"), 480 + cards.length * 130 + 180);
 }
 
 /* milestone days get the bigger celebration */
@@ -496,14 +520,14 @@ function renderWeek(container) {
   });
 }
 
-function countUp(elm, from, to, dur) {
+function countUp(elm, from, to, dur, prefix = "") {
   const start = performance.now();
   function frame(now) {
     const t = Math.min(1, (now - start) / dur);
     const eased = 1 - Math.pow(1 - t, 3);
-    elm.textContent = Math.round(from + (to - from) * eased);
+    elm.textContent = prefix + Math.round(from + (to - from) * eased);
     if (t < 1) requestAnimationFrame(frame);
-    else elm.textContent = to;
+    else elm.textContent = prefix + to;
   }
   requestAnimationFrame(frame);
 }
