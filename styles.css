@@ -224,6 +224,7 @@
   .heat-col { flex: 1; display: flex; flex-direction: column; gap: 3px; }
   .heat-col .heat-cell { width: 100%; height: auto; aspect-ratio: 1; }
   .heat-cell { width: 13px; height: 13px; border-radius: 3px; background: #ebedf0; }
+  .heat-cell.holiday { box-shadow: inset 0 0 0 2px #2e9e4f; }
   .heat-legend { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 10px; font-size: 11px; color: #999; }
   .heat-legend .heat-cell { width: 11px; height: 11px; aspect-ratio: auto; flex: none; }
 
@@ -258,6 +259,7 @@
   .wday.rest .ring { background: rgba(255, 255, 255, 0.05); }
   .wday.rest .lbl { opacity: 0.4; }
   .wday.frozen .ring { background: rgba(168, 214, 240, 0.9); font-size: 14px; }
+  .wday.holiday .ring { background: rgba(120, 200, 130, 0.28); border: 2px solid rgba(150, 220, 130, 0.9); font-size: 14px; }
   /* crisp gapped ring on today: bg-colored inner shadow makes the gap */
   .wday.today .lbl { opacity: 1; }
   .wday.today .ring { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px rgba(255, 255, 255, 0.9); }
@@ -340,6 +342,22 @@
   .gem-sep { width: 1px; align-self: stretch; background: #e0e0e0; }
   .gem-row .btn-soft { margin-left: auto; white-space: nowrap; }
   .gem-row .btn-soft:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* holidays (free, manual streak protection) */
+  .holiday-box { background: #f5f5f5; border-radius: 10px; padding: 12px 14px; margin-bottom: 20px; }
+  .hol-head { display: flex; align-items: center; gap: 10px; position: relative; }
+  .hol-title { font-size: 14px; font-weight: 800; color: #222; }
+  .hol-head .btn-soft { margin-left: auto; white-space: nowrap; }
+  /* kept rendered (not display:none) so showPicker() works, but visually out of the way */
+  .hol-date-input { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+  .hol-desc { font-size: 12px; color: #888; font-weight: 600; margin-top: 8px; }
+  .hol-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .hol-empty { font-size: 12px; color: #aaa; font-weight: 600; }
+  .hol-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+    color: #2e7d3f; background: #e6f4ea; border: 1px solid #bfe3c9; border-radius: 999px;
+    padding: 5px 10px; cursor: pointer; }
+  .hol-chip:hover { background: #d8eede; }
+  .hol-chip .hol-x { font-size: 14px; line-height: 1; opacity: 0.7; }
 
   /* today's XP chip in the sessions card */
   .today-xp { font-size: 12px; font-weight: 700; color: var(--ink-dim); background: rgba(0,0,0,0.14); padding: 2px 8px; border-radius: 999px; margin-right: 10px; }

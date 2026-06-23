@@ -53,6 +53,7 @@ const DEFAULTS = {
   gems: 0,         // earned by focusing, spent on streak freezes
   freezes: 0,      // banked streak freezes
   frozenDays: {},  // "YYYY-MM-DD": true, days auto-saved by a freeze
+  holidays: {},    // "YYYY-MM-DD": true, days marked off by hand (free, never break the streak)
   joined: null,    // first day used, for "since joining" stats
   updatedAt: 0,    // last local edit, used to reconcile across devices
   cfgUpdatedAt: 0, // last config edit, so settings sync independently of activity
@@ -114,7 +115,7 @@ function isRestDay(key) {
   return dow === 0 || dow === 6; // Sun / Sat
 }
 function dayCovered(key) {
-  return (state.history[key] || 0) >= STREAK_GOAL || !!state.frozenDays[key];
+  return (state.history[key] || 0) >= STREAK_GOAL || !!state.frozenDays[key] || !!state.holidays[key];
 }
 function computeStreak() {
   const today = dayKey();
@@ -134,7 +135,9 @@ function computeStreak() {
   return { streak, atRisk: atRisk && streak > 0 };
 }
 function computeBest() {
-  const keys = Object.keys(state.history).concat(Object.keys(state.frozenDays));
+  const keys = Object.keys(state.history)
+    .concat(Object.keys(state.frozenDays))
+    .concat(Object.keys(state.holidays));
   if (state.joined) keys.push(state.joined);
   if (!keys.length) return 0;
   let cur = keys.sort()[0];
@@ -499,7 +502,8 @@ function weekDays() {
     const done = (state.history[k] || 0) >= STREAK_GOAL;
     out.push({
       letter: WEEK_LETTERS[i], key: k, done,
-      frozen: !done && !!state.frozenDays[k],
+      holiday: !done && !!state.holidays[k],
+      frozen: !done && !state.holidays[k] && !!state.frozenDays[k],
       rest: !done && isRestDay(k),
       isToday: k === tKey,
       future: d > today && k !== tKey,
@@ -512,9 +516,10 @@ function renderWeek(container) {
   container.innerHTML = "";
   weekDays().forEach((d) => {
     const w = document.createElement("div");
-    w.className = "wday" + (d.done ? " done" : "") + (d.frozen ? " frozen" : "") +
-      (d.rest ? " rest" : "") + (d.isToday ? " today" : "") + (d.future ? " future" : "");
-    const mark = d.frozen ? "🧊" : "";
+    w.className = "wday" + (d.done ? " done" : "") + (d.holiday ? " holiday" : "") +
+      (d.frozen ? " frozen" : "") + (d.rest ? " rest" : "") +
+      (d.isToday ? " today" : "") + (d.future ? " future" : "");
+    const mark = d.holiday ? "🌴" : (d.frozen ? "🧊" : "");
     w.innerHTML = `<div class="lbl">${d.letter}</div><div class="ring">${mark}</div>`;
     container.appendChild(w);
   });
@@ -747,6 +752,9 @@ function openReport() {
 
   renderChart();
   renderHeat();
+  renderHolidays();
+  const hd = document.getElementById("holidayDate");
+  if (hd) { hd.max = dayKey(); hd.value = ""; }
   const rm = document.getElementById("reportModal");
   rm.hidden = false; rm.classList.add("open");
 }
@@ -815,6 +823,44 @@ function buyFreeze() {
   toast("🧊 Streak freeze added!");
   openReport();
 }
+/* Mark/unmark a day as a holiday. Free, retroactive: marking a past gap day
+   immediately heals the streak because computeStreak walks dayCovered(). */
+function setHoliday(key, on) {
+  if (!key) return;
+  if (on) state.holidays[key] = true;
+  else delete state.holidays[key];
+  save();
+  renderAll();        // streak chip + week strip
+  renderHolidays();   // the chip list in the profile
+  // keep the profile numbers (streak/best) and heatmap in sync if it's open
+  const rm = document.getElementById("reportModal");
+  if (rm && !rm.hidden) {
+    document.getElementById("rStreak").textContent = computeStreak().streak;
+    document.getElementById("rBest").textContent = Math.max(computeBest(), computeStreak().streak);
+    renderHeat();
+  }
+}
+function renderHolidays() {
+  const list = document.getElementById("holidayList");
+  if (!list) return;
+  const keys = Object.keys(state.holidays).sort().reverse();
+  list.innerHTML = "";
+  if (!keys.length) {
+    list.innerHTML = `<span class="hol-empty">No days marked yet.</span>`;
+    return;
+  }
+  keys.forEach((k) => {
+    const [y, m, d] = k.split("-").map(Number);
+    const label = new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const chip = document.createElement("button");
+    chip.className = "hol-chip";
+    chip.type = "button";
+    chip.innerHTML = `🌴 ${label} <span class="hol-x" aria-hidden="true">×</span>`;
+    chip.title = `Remove holiday on ${k}`;
+    chip.addEventListener("click", () => setHoliday(k, false));
+    list.appendChild(chip);
+  });
+}
 function heatColor(n) {
   if (!n) return "#ebedf0";
   if (n < 2) return "#c6e48b";
@@ -839,9 +885,15 @@ function renderHeat() {
       const cell = document.createElement("div");
       cell.className = "heat-cell";
       if (date <= today) {
-        const n = state.history[dayKey(date)] || 0;
+        const dk = dayKey(date);
+        const n = state.history[dk] || 0;
         cell.style.background = heatColor(n);
-        cell.title = `${dayKey(date)}: ${n} session${n === 1 ? "" : "s"}`;
+        if (state.holidays[dk]) {
+          cell.classList.add("holiday");
+          cell.title = `${dk}: holiday 🌴${n ? ` · ${n} session${n === 1 ? "" : "s"}` : ""}`;
+        } else {
+          cell.title = `${dk}: ${n} session${n === 1 ? "" : "s"}`;
+        }
       } else {
         cell.style.visibility = "hidden";
       }
@@ -1022,6 +1074,23 @@ bindToggle("cfgNotify", "notify", (on) => {
 });
 
 document.getElementById("buyFreeze").addEventListener("click", buyFreeze);
+(() => {
+  const hd = document.getElementById("holidayDate");
+  if (!hd) return;
+  // open the native calendar from the label button when supported
+  document.getElementById("holidayAdd").addEventListener("click", () => {
+    try { if (hd.showPicker) hd.showPicker(); else hd.focus(); }
+    catch (e) { hd.focus(); }
+  });
+  hd.addEventListener("change", () => {
+    const k = hd.value; // already YYYY-MM-DD
+    if (!k) return;
+    if (k > dayKey()) { toast("You can only mark today or a past day."); hd.value = ""; return; }
+    if (state.holidays[k]) { toast("That day is already a holiday 🌴"); }
+    else { setHoliday(k, true); toast("🌴 Holiday marked, streak protected."); }
+    hd.value = "";
+  });
+})();
 document.querySelectorAll(".vt-btn").forEach((b) =>
   b.addEventListener("click", () => { state.config.chartView = b.dataset.view; saveConfig(); openReport(); })
 );
@@ -1090,7 +1159,22 @@ function maybeFreeze() {
    top. The app fully works signed out; sync just mirrors a private nicofocus.json
    into a hidden per-app folder in YOUR Google Drive (drive.appdata scope only). */
 let tokenClient = null, accessToken = null, driveFileId = null, tokenExpiry = 0;
-let signedIn = false, syncing = false, lastSyncAt = 0, pushTimer = null;
+let signedIn = false, syncing = false, lastSyncAt = 0, pushTimer = null, refreshTimer = null;
+
+/* Google access tokens only live ~1h, and there's no refresh token without a backend.
+   So while the app is open we renew silently a couple minutes before expiry: on
+   desktop/Android Chrome this needs no popup (the Google session is still alive), so
+   you stay "Synced" all day instead of seeing "Reconnect" every hour. iOS Safari may
+   still block the silent renew (tracking prevention) and fall back to the button. */
+function scheduleTokenRefresh() {
+  clearTimeout(refreshTimer);
+  if (!tokenExpiry || localStorage.getItem(CONNECTED_KEY) !== "1") return;
+  const lead = 2 * 60 * 1000;
+  const delay = Math.max(15000, tokenExpiry - Date.now() - lead);
+  refreshTimer = setTimeout(() => {
+    if (localStorage.getItem(CONNECTED_KEY) === "1") connectGoogle(false); // silent renew
+  }, delay);
+}
 const TOKEN_KEY = "nicofocus.token", TOKEN_EXP_KEY = "nicofocus.tokenExp";
 const CONNECTED_KEY = "nicofocus.connected", GCLIENT_KEY = "nicofocus.gclient";
 
@@ -1116,6 +1200,7 @@ function initSync() {
   if (tok && exp > Date.now() + 60000) {
     accessToken = tok; tokenExpiry = exp; signedIn = true;
     updateSyncUI();
+    scheduleTokenRefresh();
     pullAndMerge().catch((e) => console.warn("sync on load failed", e));
   }
   waitForGsi(() => {
@@ -1145,6 +1230,7 @@ function connectGoogle(interactive) {
 
 function clearToken() {
   accessToken = null; tokenExpiry = 0; signedIn = false; driveFileId = null;
+  clearTimeout(refreshTimer);
   try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_EXP_KEY); } catch (e) {}
 }
 function disconnectGoogle() {
@@ -1166,6 +1252,7 @@ async function onToken(resp) {
     localStorage.setItem(TOKEN_EXP_KEY, String(tokenExpiry));
     localStorage.setItem(CONNECTED_KEY, "1");
   } catch (e) {}
+  scheduleTokenRefresh();
   updateSyncUI();
   try { await pullAndMerge(); }
   catch (e) { console.warn("initial sync failed", e); syncing = false; updateSyncUI(); }
@@ -1220,7 +1307,7 @@ function mergeDocs(local, remote) {
     for (const k in b) o[k] = Math.max(o[k] || 0, b[k] || 0);
     return o;
   };
-  const mergeTrue = (a = {}, b = {}) => ({ ...a, ...b }); // union of frozen days
+  const mergeTrue = (a = {}, b = {}) => ({ ...a, ...b }); // union of frozen / holiday days
   const newer = (remote.updatedAt || 0) > (local.updatedAt || 0) ? remote : local;
   // config follows the most recent CONFIG edit, independent of session activity,
   // so changing the daily goal on one device isn't overwritten by newer focus
@@ -1233,6 +1320,7 @@ function mergeDocs(local, remote) {
     minutes: mergeMax(local.minutes, remote.minutes),
     xpByDay: mergeMax(local.xpByDay, remote.xpByDay),
     frozenDays: mergeTrue(local.frozenDays, remote.frozenDays),
+    holidays: mergeTrue(local.holidays, remote.holidays),
     tasks: newer.tasks || [],
     activeTask: newer.activeTask ?? null,
     pomoSinceLong: newer.pomoSinceLong || 0,
