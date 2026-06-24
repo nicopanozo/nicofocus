@@ -50,6 +50,7 @@ const DEFAULTS = {
   tasks: [],
   activeTask: null,
   pomoSinceLong: 0,
+  cycleDay: null,  // day the long-break cycle belongs to; a new day resets pomoSinceLong
   gems: 0,         // earned by focusing, spent on streak freezes
   freezes: 0,      // banked streak freezes
   frozenDays: {},  // "YYYY-MM-DD": true, days auto-saved by a freeze
@@ -282,6 +283,18 @@ function resetTimerTo(m, autoStart = false) {
   else saveTimer();
 }
 
+/* The long-break cycle is a per-day thing: a new day restarts the round counter at
+   #1 and clears any partial cycle left from yesterday (so the first session of the
+   day never jumps straight to a long break). */
+function ensureCycleForToday() {
+  const k = dayKey();
+  if (state.cycleDay !== k) {
+    state.cycleDay = k;
+    state.pomoSinceLong = 0;
+    persistLocalOnly();
+  }
+}
+
 function finishMode() {
   stopTicking();
   running = false;
@@ -290,6 +303,7 @@ function finishMode() {
   notify(mode === "pomodoro" ? "Focus session done! Take a break." : "Break over, back to focus.");
 
   if (mode === "pomodoro") {
+    ensureCycleForToday();
     const result = recordSession();
     state.pomoSinceLong = (state.pomoSinceLong || 0) + 1;
     const nextLong = state.pomoSinceLong >= state.config.interval;
@@ -649,6 +663,7 @@ function dailyMessage(todayCount, goal) {
 
 /* ---------------- render ---------------- */
 function renderAll() {
+  ensureCycleForToday();
   const { streak, atRisk } = computeStreak();
   el.streakNum.textContent = streak;
   el.streakChip.classList.toggle("at-risk", atRisk);
@@ -994,7 +1009,7 @@ el.startBtn.addEventListener("click", toggleTimer);
 el.skipBtn.addEventListener("click", () => {
   playClick();
   // skipping a pomodoro does NOT count toward the streak
-  if (mode === "pomodoro") { state.pomoSinceLong = (state.pomoSinceLong || 0) + 1; if (state.pomoSinceLong >= state.config.interval) state.pomoSinceLong = 0; save(); resetTimerTo(state.pomoSinceLong === 0 ? "long" : "short"); }
+  if (mode === "pomodoro") { ensureCycleForToday(); state.pomoSinceLong = (state.pomoSinceLong || 0) + 1; if (state.pomoSinceLong >= state.config.interval) state.pomoSinceLong = 0; save(); resetTimerTo(state.pomoSinceLong === 0 ? "long" : "short"); }
   else resetTimerTo("pomodoro");
   renderAll();
 });
@@ -1324,6 +1339,7 @@ function mergeDocs(local, remote) {
     tasks: newer.tasks || [],
     activeTask: newer.activeTask ?? null,
     pomoSinceLong: newer.pomoSinceLong || 0,
+    cycleDay: newer.cycleDay ?? null,
     gems: newer.gems || 0,        // balance: latest device wins
     freezes: newer.freezes || 0,  // balance: latest device wins
     joined: earliestJoin,
