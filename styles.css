@@ -92,13 +92,13 @@
   .start-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18); }
 
   .skip-btn {
-    position: absolute; right: 0;
+    position: absolute; left: calc(50% + 100px + 12px);
     background: transparent; border: none; color: var(--ink);
-    cursor: pointer; opacity: 0; transition: opacity 0.2s;
+    cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 0.2s;
     padding: 10px;
   }
-  .skip-btn.show { opacity: 0.9; }
-  .skip-btn svg { width: 26px; height: 26px; fill: currentColor; }
+  .skip-btn.show { opacity: 0.9; pointer-events: auto; }
+  .skip-btn svg { width: 29px; height: 29px; fill: currentColor; }
 
   .round-counter { margin-top: 26px; opacity: 0.55; font-weight: 700; }
   .focus-msg { margin-top: 6px; font-size: 15px; opacity: 0.9; }
@@ -437,6 +437,7 @@
     .top-actions { gap: 6px; }
     .timer-card { padding: 22px 12px 28px; }
     .start-btn { width: 170px; font-size: 20px; }
+    .skip-btn { left: calc(50% + 85px + 12px); }
     .overlay { padding: 18px 10px; }
     .modal-body { padding: 16px 16px 22px; }
     .stat-grid { gap: 10px; }
