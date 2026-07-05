@@ -1134,6 +1134,9 @@ document.querySelectorAll(".vt-btn").forEach((b) =>
 /* keyboard shortcuts */
 document.addEventListener("keydown", (e) => {
   if (/input|textarea/i.test(e.target.tagName)) return;
+  // let browser shortcuts through (Cmd+R reload, Cmd+S save, etc.) instead of
+  // firing our single-key shortcuts and flashing a modal open before the action
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (e.code === "Space") { e.preventDefault(); toggleTimer(); }
   else if (k === "1") resetTimerTo("pomodoro");

@@ -4,7 +4,7 @@ A personal Pomodoro timer with a Duolingo-style daily streak. No build step, no 
 Runs on GitHub Pages. Data is stored locally and (optionally) synced to a private folder
 in your own Google Drive.
 
-Live: https://nicolaspanozo-kh.github.io/nicofocus/
+Live: https://nicopanozo.github.io/nicofocus/
 
 ## Screenshots
 
@@ -64,7 +64,7 @@ Sync needs a Google OAuth Client ID. It is **not a secret** and is safe to commi
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID:**
    - Application type: **Web application**
    - **Authorized JavaScript origins**, add:
-     - `https://nicolaspanozo-kh.github.io`
+     - `https://nicopanozo.github.io`
      - `http://localhost:8000` (only if you test locally - see below)
    - Create, then copy the **Client ID** (`...apps.googleusercontent.com`).
 5. Paste it into the app at **Settings → Sync → Google OAuth Client ID**, then click
