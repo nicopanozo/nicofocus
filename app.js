@@ -19,8 +19,10 @@
  *   history       sessions completed per day
  *   minutes       focus minutes per day
  *   xpByDay       gamified XP per day (total XP = sum of these)
+ *   ratings       per-day session depth counts {shallow,solid,deep} - informational only
  *   frozenDays    days a streak-freeze covered
- *   tasks/activeTask, pomoSinceLong, gems, freezes, joined
+ *   repairedDays  gap days earned back by a streak repair
+ *   goals/activeGoal, pomoSinceLong, freezes, freezeEarnedOn, joined
  *   updatedAt     last edit (for merge); cfgUpdatedAt     last *config* edit (config merges by this)
  */
 
@@ -33,8 +35,10 @@ const GOOGLE_CLIENT_ID = "980514183334-bp2bu8k44eegq6sh48h0grhqlnnhs34j.apps.goo
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
 const DRIVE_FILE = "nicofocus.json";
 
-const FREEZE_COST = 15;   // gems to buy one streak freeze
-const MAX_FREEZES = 2;    // most you can bank at once
+const MAX_FREEZES = 2;      // most freezes you can bank at once
+const FREEZE_EARN_DAYS = 7; // consecutive streak days that earn one freeze back
+const REPAIR_SESSIONS = 2;  // sessions on the comeback day that restore a broken streak
+const REPAIR_MAX_GAP = 2;   // longest gap (work days) that can still be repaired
 
 const DEFAULTS = {
   config: {
@@ -47,29 +51,38 @@ const DEFAULTS = {
   history: {},     // "YYYY-MM-DD": sessionCount
   minutes: {},     // "YYYY-MM-DD": focus minutes
   xpByDay: {},     // "YYYY-MM-DD": gamified XP earned that day
-  tasks: [],
-  activeTask: null,
+  ratings: {},     // "YYYY-MM-DD": {shallow,solid,deep} counts - informational, never gates rewards
+  goals: [],       // {id, name, deadline, enough, checkpoints:[{id,text,done,completedAt}], createdAt, completedAt}
+  activeGoal: null,
   pomoSinceLong: 0,
   cycleDay: null,  // day the long-break cycle belongs to; a new day resets pomoSinceLong
-  gems: 0,         // earned by focusing, spent on streak freezes
-  freezes: 0,      // banked streak freezes
+  freezes: 2,      // streak freezes: start with 2, earn 1 back per 7-day streak (max 2)
+  freezeEarnedOn: null, // day the last freeze was earned, prevents double grants
   frozenDays: {},  // "YYYY-MM-DD": true, days auto-saved by a freeze
+  repairedDays: {},// "YYYY-MM-DD": true, gap days restored by a streak repair
   holidays: {},    // "YYYY-MM-DD": true, days marked off by hand (free, never break the streak)
   joined: null,    // first day used, for "since joining" stats
   updatedAt: 0,    // last local edit, used to reconcile across devices
   cfgUpdatedAt: 0, // last config edit, so settings sync independently of activity
 };
 
+/* one-time migrations for state blobs written by older versions */
+function normalize(s) {
+  if ("gems" in s) { s.freezes = MAX_FREEZES; delete s.gems; } // gems retired: full freeze bank as a send-off
+  delete s.tasks; delete s.activeTask;                         // tasks replaced by goals
+  return s;
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return structuredClone(DEFAULTS);
     const data = JSON.parse(raw);
-    return {
+    return normalize({
       ...structuredClone(DEFAULTS),
       ...data,
       config: { ...DEFAULTS.config, ...(data.config || {}) },
-    };
+    });
   } catch (e) {
     console.warn("load failed, using defaults", e);
     return structuredClone(DEFAULTS);
@@ -116,7 +129,8 @@ function isRestDay(key) {
   return dow === 0 || dow === 6; // Sun / Sat
 }
 function dayCovered(key) {
-  return (state.history[key] || 0) >= STREAK_GOAL || !!state.frozenDays[key] || !!state.holidays[key];
+  return (state.history[key] || 0) >= STREAK_GOAL || !!state.frozenDays[key] ||
+    !!state.holidays[key] || !!state.repairedDays[key];
 }
 function computeStreak() {
   const today = dayKey();
@@ -138,7 +152,8 @@ function computeStreak() {
 function computeBest() {
   const keys = Object.keys(state.history)
     .concat(Object.keys(state.frozenDays))
-    .concat(Object.keys(state.holidays));
+    .concat(Object.keys(state.holidays))
+    .concat(Object.keys(state.repairedDays));
   if (state.joined) keys.push(state.joined);
   if (!keys.length) return 0;
   let cur = keys.sort()[0];
@@ -171,6 +186,30 @@ function applyFreezes() {
   state.freezes -= missed.length;
   persistLocalOnly();
   return missed.length;
+}
+/* A broken streak can be earned back while today is still the comeback window:
+   an uncovered gap of 1..REPAIR_MAX_GAP work days sits right after a real streak.
+   Needs no persistence - once the gap is covered another way (or grows past the
+   cap) the offer simply stops existing. */
+function repairOffer() {
+  let cursor = shiftDay(dayKey(), -1);
+  const gap = [];
+  let guard = 0;
+  while (guard++ < 60) {
+    if (isRestDay(cursor)) { cursor = shiftDay(cursor, -1); continue; }
+    if (dayCovered(cursor)) break;
+    gap.push(cursor);
+    if (gap.length > REPAIR_MAX_GAP) return null;
+    cursor = shiftDay(cursor, -1);
+  }
+  if (!gap.length) return null;
+  let prev = 0;
+  while (guard++ < 3700) {
+    if (isRestDay(cursor)) { cursor = shiftDay(cursor, -1); continue; }
+    if (dayCovered(cursor)) { prev++; cursor = shiftDay(cursor, -1); }
+    else break;
+  }
+  return prev >= 1 ? { gap, prevStreak: prev } : null;
 }
 
 /* ---------------- timer engine (timestamp-based) ---------------- */
@@ -332,19 +371,34 @@ function recordSession() {
   state.minutes[k] = (state.minutes[k] || 0) + minutes;
   const xp = XP_BASE + minutes * XP_PER_MIN + XP_MOMENTUM * todayCount;
   state.xpByDay[k] = (state.xpByDay[k] || 0) + xp;
-  // earn gems: 1 per session, +3 bonus the moment you hit the daily goal
-  state.gems = (state.gems || 0) + 1;
-  if (todayCount === state.config.goal) state.gems += 3;
-  // bump active task
-  if (state.activeTask != null) {
-    const t = state.tasks.find((t) => t.id === state.activeTask);
-    if (t) t.done = (t.done || 0) + 1;
+  // a broken streak is earned back by effort: enough sessions today restore the gap
+  const offer = repairOffer();
+  let repaired = false;
+  if (offer && todayCount >= REPAIR_SESSIONS) {
+    offer.gap.forEach((d) => { state.repairedDays[d] = true; });
+    repaired = true;
+  }
+  const newStreak = computeStreak().streak;
+  // consistency earns a freeze back: one per full week of streak (max 2 banked)
+  if (newStreak > 0 && newStreak % FREEZE_EARN_DAYS === 0 &&
+      (state.freezes || 0) < MAX_FREEZES && state.freezeEarnedOn !== k) {
+    state.freezes = (state.freezes || 0) + 1;
+    state.freezeEarnedOn = k;
+    setTimeout(() => toast("🧊 Freeze earned - a full week of showing up."), 800);
   }
   save();
-  const newStreak = computeStreak().streak;
   const streakGrew = newStreak > prevStreak;
   if (streakGrew) notify(`Streak extended! 🔥 ${newStreak}-day streak.`);
-  return { xp, minutes, todayCount, prevStreak, newStreak, streakGrew, milestone: streakGrew && isMilestone(newStreak) };
+  return { xp, minutes, todayCount, prevStreak, newStreak, streakGrew, repaired, day: k, milestone: streakGrew && isMilestone(newStreak) };
+}
+
+/* store a session's self-rated depth. Purely informational: feeds the chart and
+   weekly report only - never XP, streak, or freezes. */
+function recordRating(day, quality, prevQuality) {
+  const r = state.ratings[day] = state.ratings[day] || { shallow: 0, solid: 0, deep: 0 };
+  if (prevQuality) r[prevQuality] = Math.max(0, (r[prevQuality] || 0) - 1);
+  r[quality] = (r[quality] || 0) + 1;
+  save();
 }
 
 /* show the per-session "Session complete!" screen, then the streak celebration if the
@@ -357,6 +411,7 @@ function runOrQueueCelebration(fn) {
 function celebrateSession(result) {
   runOrQueueCelebration(() => {
     showSessionComplete(result, () => {
+      if (result.repaired) toast(`💪 Streak repaired - ${result.newStreak} days. Welcome back.`);
       if (result.streakGrew) celebrate(result.prevStreak, result.newStreak, result.milestone);
     });
   });
@@ -371,6 +426,22 @@ function showSessionComplete(result, onContinue) {
   const cards = sd.querySelectorAll(".sd-card");
   cards.forEach((c) => c.classList.remove("in"));
   btn.classList.remove("show");
+
+  // depth rating: optional, purely informational (never touches XP or streak).
+  // Re-clicking a different button before dismissing moves the count over.
+  const rateBtns = sd.querySelectorAll(".sd-rate-btn");
+  let chosen = null;
+  rateBtns.forEach((b) => {
+    b.classList.remove("sel");
+    b.onclick = () => {
+      if (!result.day) return; // dev test sessions have no day to attach to
+      recordRating(result.day, b.dataset.q, chosen);
+      chosen = b.dataset.q;
+      rateBtns.forEach((x) => x.classList.toggle("sel", x === b));
+      playClick();
+    };
+  });
+
   sd.hidden = false;
   sd.classList.add("open");
   playSessionSound();
@@ -518,6 +589,7 @@ function weekDays() {
       letter: WEEK_LETTERS[i], key: k, done,
       holiday: !done && !!state.holidays[k],
       frozen: !done && !state.holidays[k] && !!state.frozenDays[k],
+      repaired: !done && !state.holidays[k] && !state.frozenDays[k] && !!state.repairedDays[k],
       rest: !done && isRestDay(k),
       isToday: k === tKey,
       future: d > today && k !== tKey,
@@ -531,9 +603,9 @@ function renderWeek(container) {
   weekDays().forEach((d) => {
     const w = document.createElement("div");
     w.className = "wday" + (d.done ? " done" : "") + (d.holiday ? " holiday" : "") +
-      (d.frozen ? " frozen" : "") + (d.rest ? " rest" : "") +
+      (d.frozen ? " frozen" : "") + (d.repaired ? " repaired" : "") + (d.rest ? " rest" : "") +
       (d.isToday ? " today" : "") + (d.future ? " future" : "");
-    const mark = d.holiday ? "🌴" : (d.frozen ? "🧊" : "");
+    const mark = d.holiday ? "🌴" : (d.frozen ? "🧊" : (d.repaired ? "💪" : ""));
     w.innerHTML = `<div class="lbl">${d.letter}</div><div class="ring">${mark}</div>`;
     container.appendChild(w);
   });
@@ -612,7 +684,7 @@ const el = {
   goalCount: document.getElementById("goalCount"),
   todayBar: document.getElementById("todayBar"),
   goalMsg: document.getElementById("goalMsg"),
-  taskList: document.getElementById("taskList"),
+  goalList: document.getElementById("goalList"),
 };
 
 /* ---------------- theming ---------------- */
@@ -677,35 +749,142 @@ function renderAll() {
   document.getElementById("todayXp").textContent = state.xpByDay[dayKey()] || 0;
 
   el.roundCounter.textContent = "#" + ((state.pomoSinceLong || 0) % state.config.interval + 1);
+
+  // streak-repair banner: honest terms, disappears on its own once the window closes
+  const rb = document.getElementById("repairBanner");
+  if (rb) {
+    const offer = repairOffer();
+    rb.hidden = !offer;
+    if (offer) rb.textContent = `Your ${offer.prevStreak}-day streak broke. Finish ${REPAIR_SESSIONS} sessions today to repair it - ${Math.min(today, REPAIR_SESSIONS)} of ${REPAIR_SESSIONS} done.`;
+  }
+
   renderWeek(document.getElementById("weekStrip"));
-  renderTasks();
+  renderGoals();
 }
 
-function renderTasks() {
-  el.taskList.innerHTML = "";
-  state.tasks.forEach((t) => {
+/* ---------------- goals ---------------- */
+/* A goal is deliberately open-ended: no percent bar, no session estimates.
+   Progress = checkpoints completed. Planning = only the next 1-3 concrete steps;
+   when they run out you reflect and add the next batch (iterate, like prompting). */
+const MAX_OPEN_CHECKPOINTS = 3;
+function newId() { return Date.now() + "-" + Math.random().toString(36).slice(2, 6); }
+function daysUntil(deadline) {
+  if (!deadline) return null;
+  return Math.round((new Date(deadline + "T00:00") - new Date(dayKey() + "T00:00")) / 86400000);
+}
+let openGoalEditor = null; // assigned by the goal-form closure below
+
+function renderGoals() {
+  el.goalList.innerHTML = "";
+  state.goals.forEach((g) => {
+    const doneCount = g.checkpoints.filter((c) => c.done).length;
+    const openCps = g.checkpoints.filter((c) => !c.done);
+    const expanded = g.id === state.activeGoal && !g.completedAt;
     const div = document.createElement("div");
-    div.className = "task" + (t.id === state.activeTask ? " active" : "") + (t.completed ? " done" : "");
+    div.className = "goal" + (expanded ? " active" : "") + (g.completedAt ? " done" : "");
+
+    const left = daysUntil(g.deadline);
+    const deadlineChip = left == null ? "" :
+      left > 0 ? `<span class="goal-chip${left <= 3 ? " soon" : ""}">${left} day${left === 1 ? "" : "s"} left</span>` :
+      left === 0 ? `<span class="goal-chip soon">due today</span>` :
+      `<span class="goal-chip over">${-left} day${left === -1 ? "" : "s"} past deadline</span>`;
+    const meta = g.completedAt
+      ? `<span class="goal-chip done-chip">completed</span>`
+      : `<span class="goal-chip">${doneCount} done</span>` + deadlineChip;
     div.innerHTML = `
-      <div class="check"></div>
-      <div class="task-name"></div>
-      <div class="task-pomo">${t.done || 0}/${t.est || 1}</div>
-      <button class="task-del" title="Delete">×</button>`;
-    div.querySelector(".task-name").textContent = t.name;
-    div.querySelector(".check").addEventListener("click", (e) => {
-      e.stopPropagation(); t.completed = !t.completed; save(); renderTasks();
+      <div class="goal-head">
+        <div class="goal-name"></div>
+        <div class="goal-meta">${meta}</div>
+        <button class="task-del" title="Delete">×</button>
+      </div>`;
+    div.querySelector(".goal-name").textContent = g.name;
+    div.querySelector(".goal-head").addEventListener("click", () => {
+      state.activeGoal = state.activeGoal === g.id ? null : g.id;
+      save(); renderGoals();
     });
     div.querySelector(".task-del").addEventListener("click", (e) => {
       e.stopPropagation();
-      state.tasks = state.tasks.filter((x) => x.id !== t.id);
-      if (state.activeTask === t.id) state.activeTask = null;
-      save(); renderTasks();
+      if (!confirm(`Delete goal "${g.name}" and its checkpoints?`)) return;
+      state.goals = state.goals.filter((x) => x.id !== g.id);
+      if (state.activeGoal === g.id) state.activeGoal = null;
+      save(); renderGoals();
     });
-    div.addEventListener("click", () => {
-      state.activeTask = state.activeTask === t.id ? null : t.id;
-      save(); renderTasks();
-    });
-    el.taskList.appendChild(div);
+
+    if (expanded) {
+      const body = document.createElement("div");
+      body.className = "goal-body";
+      if (g.enough) {
+        const en = document.createElement("div");
+        en.className = "goal-enough";
+        en.textContent = "Done means: " + g.enough;
+        body.appendChild(en);
+      }
+      g.checkpoints.forEach((c) => {
+        const row = document.createElement("div");
+        row.className = "cp" + (c.done ? " done" : "");
+        row.innerHTML = `<div class="check"></div><div class="cp-text"></div>`;
+        row.querySelector(".cp-text").textContent = c.text;
+        row.addEventListener("click", () => {
+          c.done = !c.done;
+          c.completedAt = c.done ? Date.now() : null;
+          save();
+          if (c.done) { playClick(); toast("✔ " + c.text); }
+          renderGoals();
+        });
+        body.appendChild(row);
+      });
+      // iterate loop: all checkpoints done -> reflect, then plan the next 1-3
+      if (g.checkpoints.length && !openCps.length) {
+        const box = document.createElement("div");
+        box.className = "iterate-box";
+        box.textContent = "All checkpoints done. What did you learn? Add the next 1-3, or complete the goal.";
+        body.appendChild(box);
+      }
+      if (openCps.length < MAX_OPEN_CHECKPOINTS) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "cp-add";
+        input.placeholder = g.checkpoints.length ? "Next checkpoint..." : "First checkpoint: the very next concrete step";
+        input.maxLength = 160;
+        input.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          const text = input.value.trim();
+          if (!text) return;
+          g.checkpoints.push({ id: newId(), text, done: false, completedAt: null });
+          save(); renderGoals();
+          const ni = el.goalList.querySelector(".goal.active .cp-add");
+          if (ni) ni.focus();
+        });
+        body.appendChild(input);
+      } else {
+        const hint = document.createElement("div");
+        hint.className = "cp-cap";
+        hint.textContent = "Finish a checkpoint to add the next.";
+        body.appendChild(hint);
+      }
+      const actions = document.createElement("div");
+      actions.className = "goal-actions";
+      const editBtn = document.createElement("button");
+      editBtn.className = "btn-soft";
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", () => { if (openGoalEditor) openGoalEditor(g); });
+      actions.appendChild(editBtn);
+      if (g.checkpoints.length && !openCps.length) {
+        const doneBtn = document.createElement("button");
+        doneBtn.className = "btn-soft goal-complete";
+        doneBtn.textContent = "Complete goal 🎉";
+        doneBtn.addEventListener("click", () => {
+          g.completedAt = Date.now();
+          if (state.activeGoal === g.id) state.activeGoal = null;
+          save(); confetti(); toast("🏁 Goal completed: " + g.name);
+          renderGoals();
+        });
+        actions.appendChild(doneBtn);
+      }
+      body.appendChild(actions);
+      div.appendChild(body);
+    }
+    el.goalList.appendChild(div);
   });
 }
 
@@ -735,6 +914,21 @@ function weekTotals() {
   for (let i = 0; i < 7; i++) { week += valOn(shiftDay(today, -i)); prev += valOn(shiftDay(today, -i - 7)); }
   return { week, prev };
 }
+/* absolute stats for one rolling week; offset 0 = this week, 7 = last week */
+function weekStats(offset = 0) {
+  const today = dayKey();
+  let min = 0, sessions = 0, deep = 0, rated = 0, activeDays = 0;
+  for (let i = 0; i < 7; i++) {
+    const k = shiftDay(today, -i - offset);
+    min += minOn(k);
+    const s = state.history[k] || 0;
+    sessions += s;
+    if (s > 0) activeDays++;
+    const r = state.ratings[k];
+    if (r) { deep += r.deep || 0; rated += (r.shallow || 0) + (r.solid || 0) + (r.deep || 0); }
+  }
+  return { min, sessions, deep, rated, activeDays };
+}
 
 function openReport() {
   const { streak } = computeStreak();
@@ -742,25 +936,31 @@ function openReport() {
   document.getElementById("rBest").textContent = Math.max(computeBest(), streak);
   document.getElementById("rXp").textContent = totalXp().toLocaleString();
   document.getElementById("rTotalFocus").textContent = fmtHours(totalMinutes());
-  document.getElementById("rGems").textContent = state.gems || 0;
   document.getElementById("rFreezes").textContent = state.freezes || 0;
 
-  const buy = document.getElementById("buyFreeze");
-  buy.textContent = `Buy freeze · ${FREEZE_COST} 💎`;
-  buy.disabled = (state.gems || 0) < FREEZE_COST || (state.freezes || 0) >= MAX_FREEZES;
-
-  // weekly headline (this rolling week vs last)
+  // weekly headline (this rolling week vs last). On a down week, lead with what
+  // held (streak, showing up) - the honest number stays visible, never guilt-worded.
   const { week, prev } = weekTotals();
   document.getElementById("whCap").textContent = viewIsTime() ? "Focus this week" : "XP earned this week";
   document.getElementById("whVal").textContent = viewIsTime() ? fmtHours(week) : (week.toLocaleString() + " ⚡");
   const sub = document.getElementById("whSub");
   if (prev > 0) {
     const pct = Math.round(((week - prev) / prev) * 100);
-    const up = pct >= 0;
-    sub.innerHTML = `<b class="${up ? "" : "down"}">${up ? "+" : ""}${pct}%</b> ${up ? "more" : "less"} than last week`;
+    if (pct >= 0) {
+      sub.innerHTML = `<b>+${pct}%</b> more than last week`;
+    } else {
+      const cur = weekStats();
+      const held = streak > 0
+        ? `Streak held at ${streak} day${streak === 1 ? "" : "s"} - a lighter week, but you kept showing up.`
+        : cur.activeDays > 0
+          ? `You showed up ${cur.activeDays} day${cur.activeDays === 1 ? "" : "s"} this week - ready for a fresh start.`
+          : `A quiet week - ready for a fresh start.`;
+      sub.innerHTML = `${held} <b class="down">${pct}%</b> vs last week`;
+    }
   } else {
     sub.innerHTML = week > 0 ? "Your first week of focus 🌱" : "Do a session to start the week";
   }
+  renderWeekCompare(streak);
 
   // sync the view toggle UI
   document.querySelectorAll(".vt-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === state.config.chartView));
@@ -774,10 +974,52 @@ function openReport() {
   rm.hidden = false; rm.classList.add("open");
 }
 
+/* "you vs last-week you" rows: absolute numbers with honest deltas. The deep-focus
+   row only appears once rating data exists. */
+function renderWeekCompare(streak) {
+  const box = document.getElementById("weekCompare");
+  if (!box) return;
+  const cur = weekStats(), last = weekStats(7);
+  box.innerHTML = "";
+  const row = (name, val, delta, cls = "") => {
+    const div = document.createElement("div");
+    div.className = "wkc-row";
+    div.innerHTML = `<span class="wkc-name"></span><b class="wkc-val"></b><span class="wkc-delta ${cls}"></span>`;
+    div.children[0].textContent = name;
+    div.children[1].textContent = val;
+    div.children[2].textContent = delta;
+    box.appendChild(div);
+  };
+  const firstWeek = last.min === 0 && last.sessions === 0;
+  const dm = cur.min - last.min;
+  row("Focus time", fmtHours(cur.min),
+    firstWeek ? "first week" : dm === 0 ? "same as last week" : `${dm > 0 ? "+" : "-"}${fmtHours(Math.abs(dm))} vs last week`,
+    dm > 0 ? "up" : dm < 0 ? "down" : "");
+  const ds = cur.sessions - last.sessions;
+  row("Sessions", String(cur.sessions),
+    firstWeek ? "first week" : ds === 0 ? "same as last week" : `${ds > 0 ? "+" : ""}${ds} vs last week`,
+    ds > 0 ? "up" : ds < 0 ? "down" : "");
+  if (cur.rated > 0 || last.rated > 0) {
+    const pc = cur.rated ? Math.round((cur.deep / cur.rated) * 100) : 0;
+    const pl = last.rated ? Math.round((last.deep / last.rated) * 100) : null;
+    row("Deep focus", cur.rated ? `${pc}% of rated sessions` : "no rated sessions yet",
+      pl == null ? "" : `last week ${pl}%`,
+      pl != null && cur.rated ? (pc > pl ? "up" : pc < pl ? "down" : "") : "");
+  }
+  row("Streak", streak > 0 ? `Held - ${streak} day${streak === 1 ? "" : "s"}` : "Fresh start available", "");
+}
+
+/* fixed semantic palette for session depth - independent of the theme color so
+   the stacked bars stay readable on the white modal */
+const QUALITY_COLORS = { deep: "#104281", solid: "#2a78d6", shallow: "#86b6ef", unrated: "#b3b8c2" };
+function ratingsOn(k) {
+  const r = state.ratings[k] || {};
+  return { shallow: r.shallow || 0, solid: r.solid || 0, deep: r.deep || 0 };
+}
+
 function renderChart() {
   const chart = document.getElementById("chart");
   chart.innerHTML = "";
-  document.getElementById("lgCur").style.background = `rgb(${state.config.color})`;
   const today = dayKey();
   const narrow = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
   const fmtBar = (v) => viewIsTime() ? fmtHours(v) : (v + " XP");
@@ -803,11 +1045,33 @@ function renderChart() {
     col.className = "chart-col";
     col.innerHTML = `
       <div class="chart-bars">
-        <div class="bar cur" style="height:${(c.cur / top) * 100}%" title="${fmtBar(c.cur)} this week"></div>
+        <div class="bar cur" title="${fmtBar(c.cur)} this week" style="height:${(c.cur / top) * 100}%"></div>
         <div class="bar prev" style="height:${(c.prev / top) * 100}%" title="${fmtBar(c.prev)} last week"></div>
       </div>
       <div class="chart-lbl${c.isToday ? " today" : ""}">${c.label}</div>`;
-    col.querySelector(".bar.cur").style.background = `rgb(${state.config.color})`;
+    // split the day's bar into depth segments, bottom -> top: deep, solid, shallow, unrated
+    const bar = col.querySelector(".bar.cur");
+    const rated = ratingsOn(c.k);
+    const ratedSum = rated.deep + rated.solid + rated.shallow;
+    // clamp for the cross-device merge edge where rated counts can exceed merged history
+    const denom = Math.max(state.history[c.k] || 0, ratedSum);
+    const parts = denom === 0
+      ? [["unrated", 1, 0]]
+      : [
+          ["deep", rated.deep / denom, rated.deep],
+          ["solid", rated.solid / denom, rated.solid],
+          ["shallow", rated.shallow / denom, rated.shallow],
+          ["unrated", (denom - ratedSum) / denom, denom - ratedSum],
+        ];
+    parts.forEach(([q, frac, n]) => {
+      if (frac <= 0) return;
+      const seg = document.createElement("div");
+      seg.className = "seg";
+      seg.style.height = (frac * 100) + "%";
+      seg.style.background = QUALITY_COLORS[q];
+      if (n > 0) seg.title = `${n} ${q === "deep" ? "deep flow" : q} session${n === 1 ? "" : "s"}`;
+      bar.appendChild(seg);
+    });
     chart.appendChild(col);
   });
 }
@@ -819,7 +1083,7 @@ function niceCeil(n) {
   return 10 * pow;
 }
 
-/* toast + freeze purchase */
+/* toast */
 let toastTimer = null;
 function toast(msg) {
   let t = document.getElementById("toast");
@@ -828,15 +1092,6 @@ function toast(msg) {
   requestAnimationFrame(() => t.classList.add("show"));
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2800);
-}
-function buyFreeze() {
-  if ((state.freezes || 0) >= MAX_FREEZES) { toast(`Freezes are full (max ${MAX_FREEZES}).`); return; }
-  if ((state.gems || 0) < FREEZE_COST) { toast("Not enough gems yet, keep focusing!"); return; }
-  state.gems -= FREEZE_COST;
-  state.freezes = (state.freezes || 0) + 1;
-  save();
-  toast("🧊 Streak freeze added!");
-  openReport();
 }
 /* Mark/unmark a day as a holiday. Free, retroactive: marking a past gap day
    immediately heals the streak because computeStreak walks dayCovered(). */
@@ -994,7 +1249,7 @@ function importData(file) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      state = { ...structuredClone(DEFAULTS), ...data, config: { ...DEFAULTS.config, ...(data.config || {}) } };
+      state = normalize({ ...structuredClone(DEFAULTS), ...data, config: { ...DEFAULTS.config, ...(data.config || {}) } });
       save();
       resetTimerTo("pomodoro");
       renderAll(); syncSettingsUI();
@@ -1022,35 +1277,81 @@ document.getElementById("celBtn").addEventListener("click", () => {
 });
 
 (() => {
-  const form = document.getElementById("taskForm");
-  const btn = document.getElementById("addTask");
-  const nameInput = document.getElementById("taskNameInput");
-  const estVal = document.getElementById("estVal");
-  let est = 1;
-  const setEst = (v) => { est = Math.min(99, Math.max(1, v)); estVal.textContent = est; };
-  function openForm() { setEst(1); nameInput.value = ""; btn.hidden = true; form.hidden = false; nameInput.focus(); }
-  function closeForm() { form.hidden = true; btn.hidden = false; }
+  const form = document.getElementById("goalForm");
+  const btn = document.getElementById("addGoal");
+  const nameInput = document.getElementById("goalNameInput");
+  const deadlineInput = document.getElementById("goalDeadline");
+  const enoughInput = document.getElementById("goalEnough");
+  let editing = null; // goal being edited, null when creating
+  function openForm(g = null) {
+    editing = g;
+    nameInput.value = g ? g.name : "";
+    deadlineInput.value = (g && g.deadline) || "";
+    enoughInput.value = (g && g.enough) || "";
+    btn.hidden = true; form.hidden = false; nameInput.focus();
+  }
+  function closeForm() { editing = null; form.hidden = true; btn.hidden = false; }
   function saveForm() {
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
-    state.tasks.push({ id: Date.now(), name, est, done: 0, completed: false });
-    save(); renderTasks(); closeForm();
+    if (editing) {
+      editing.name = name;
+      editing.deadline = deadlineInput.value || null;
+      editing.enough = enoughInput.value.trim() || null;
+    } else {
+      const goal = { id: newId(), name, deadline: deadlineInput.value || null, enough: enoughInput.value.trim() || null, checkpoints: [], createdAt: Date.now(), completedAt: null };
+      state.goals.push(goal);
+      state.activeGoal = goal.id; // open it so the first checkpoints get added right away
+    }
+    save(); renderGoals(); closeForm();
   }
-  btn.addEventListener("click", openForm);
-  document.getElementById("taskCancel").addEventListener("click", closeForm);
-  document.getElementById("taskSave").addEventListener("click", saveForm);
-  document.getElementById("estMinus").addEventListener("click", () => setEst(est - 1));
-  document.getElementById("estPlus").addEventListener("click", () => setEst(est + 1));
-  nameInput.addEventListener("keydown", (e) => {
+  btn.addEventListener("click", () => openForm());
+  openGoalEditor = openForm;
+  document.getElementById("goalCancel").addEventListener("click", closeForm);
+  document.getElementById("goalSave").addEventListener("click", saveForm);
+  [nameInput, enoughInput].forEach((inp) => inp.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); saveForm(); }
     else if (e.key === "Escape") { e.preventDefault(); closeForm(); }
-  });
+  }));
 })();
 document.getElementById("clearDone").addEventListener("click", () => {
-  state.tasks = state.tasks.filter((t) => !t.completed);
-  if (state.activeTask && !state.tasks.find((t) => t.id === state.activeTask)) state.activeTask = null;
-  save(); renderTasks();
+  state.goals = state.goals.filter((g) => !g.completedAt);
+  if (state.activeGoal && !state.goals.find((g) => g.id === state.activeGoal)) state.activeGoal = null;
+  save(); renderGoals();
 });
+
+/* planning hints: one evidence-based tip at a time, rotating with the day */
+const PLANNING_TIPS = [
+  { tip: "Plan only the next 1-3 checkpoints", detail: "You never need the whole plan. Finish them, look at what you learned, then plan the next 1-3. Iterative projects succeed about 3x more often than fully pre-planned ones.", source: "Standish Group, CHAOS reports" },
+  { tip: "Fix the deadline, flex the scope", detail: "Give the goal a hard date and shrink what 'enough' means to fit it, instead of working until it's done. Timeboxing ranked #1 among 100 productivity techniques.", source: "Zao-Sanders, Harvard Business Review 2018" },
+  { tip: "Define 'enough' before you start", detail: "Decide the smallest complete version you would accept by the deadline. Ship that, then improve in cycles - like iterating on a prompt until the result is good.", source: "MVP principle, iterative development" },
+  { tip: "Don't trust your first time estimate", detail: "Thesis students predicted 34 days and took 55; only 30% finished by their own predicted date. Assume your gut lowballs it and estimate from real past durations of similar work.", source: "Buehler, Griffin & Ross 1994, the planning fallacy" },
+  { tip: "Write checkpoints as physical actions", detail: "'Open the doc and write one bad paragraph' beats 'work on chapter 2'. When the next step is concrete there is nothing left to decide when you sit down.", source: "David Allen, Getting Things Done" },
+  { tip: "Use if-then plans", detail: "'If it's 9am after coffee, then I start checkpoint 1.' Deciding when and where in advance raised goal attainment with a medium-to-large effect (d = 0.65) across 94 studies.", source: "Gollwitzer & Sheeran 2006, meta-analysis" },
+  { tip: "On unfamiliar work, set learning goals", detail: "When you don't yet know how, aim to 'try 2 approaches and compare' rather than to hit an outcome number. Outcome goals on novel tasks cause tunnel vision and hurt performance.", source: "Locke & Latham 2006" },
+  { tip: "Do WOOP for hard goals", detail: "Wish, Outcome, Obstacle, Plan: picture the best result, honestly name the inner obstacle, then make an if-then plan for that obstacle. Beats positive thinking alone (g = 0.34).", source: "Oettingen, Rethinking Positive Thinking" },
+  { tip: "Shrink the step until it can't fail", detail: "Scale the next checkpoint down until you'd do it on your worst day. Behavior happens when it's easy enough; motivation is the least reliable lever.", source: "BJ Fogg, Tiny Habits (B=MAP)" },
+  { tip: "End every session with a small win", detail: "One concrete piece of visible progress per session, however small. In 12,000 diary entries, progress on meaningful work was the #1 driver of good days.", source: "Amabile & Kramer, The Progress Principle" },
+  { tip: "Count checkpoints, not percent", detail: "You can't know what percent of an open-ended goal is done, so don't measure it. Track steps completed and days of showing up - the inputs you control.", source: "leading vs lagging indicators" },
+  { tip: "A redo is an iteration, not a failure", detail: "First plans are wrong in ways you can only discover by working. When something has to be redone, that's the plan improving - the same way a second prompt beats the first.", source: "iterative development" },
+];
+let tipIdx = null;
+function renderTip() {
+  const t = PLANNING_TIPS[tipIdx];
+  document.getElementById("tipMain").textContent = t.tip;
+  document.getElementById("tipDetail").textContent = t.detail;
+  document.getElementById("tipSource").textContent = t.source;
+  document.getElementById("tipCount").textContent = (tipIdx + 1) + " / " + PLANNING_TIPS.length;
+}
+document.getElementById("planHint").addEventListener("click", () => {
+  playClick();
+  if (tipIdx == null) tipIdx = dayNumber() % PLANNING_TIPS.length;
+  renderTip();
+  const hm = document.getElementById("hintModal");
+  hm.hidden = false; hm.classList.add("open");
+});
+document.getElementById("tipPrev").addEventListener("click", () => { tipIdx = (tipIdx - 1 + PLANNING_TIPS.length) % PLANNING_TIPS.length; renderTip(); });
+document.getElementById("tipNext").addEventListener("click", () => { tipIdx = (tipIdx + 1) % PLANNING_TIPS.length; renderTip(); });
 
 document.getElementById("settingsBtn").addEventListener("click", openSettings);
 document.getElementById("reportBtn").addEventListener("click", openReport);
@@ -1066,7 +1367,7 @@ document.getElementById("exportBtn").addEventListener("click", exportData);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importFile").click());
 document.getElementById("importFile").addEventListener("change", (e) => { if (e.target.files[0]) importData(e.target.files[0]); });
 document.getElementById("resetBtn").addEventListener("click", () => {
-  if (confirm("Erase ALL sessions, streak and tasks? This cannot be undone.")) {
+  if (confirm("Erase ALL sessions, streak and goals? This cannot be undone.")) {
     state = structuredClone(DEFAULTS); ensureJoined(); save();
     try { localStorage.removeItem(TIMER_KEY); } catch (e) {}
     resetTimerTo("pomodoro"); renderAll(); syncSettingsUI();
@@ -1088,7 +1389,6 @@ bindToggle("cfgNotify", "notify", (on) => {
   if (on && typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
 });
 
-document.getElementById("buyFreeze").addEventListener("click", buyFreeze);
 (() => {
   const hd = document.getElementById("holidayDate");
   if (!hd) return;
@@ -1170,6 +1470,15 @@ function maybeFreeze() {
     notify(`A streak freeze kept your ${computeStreak().streak}-day streak alive.`);
     renderAll();
   }
+}
+/* repair via sync: sessions done on another device can complete the comeback */
+function maybeRepair() {
+  const offer = repairOffer();
+  if (!offer || (state.history[dayKey()] || 0) < REPAIR_SESSIONS) return false;
+  offer.gap.forEach((d) => { state.repairedDays[d] = true; });
+  persistLocalOnly();
+  toast(`💪 Streak repaired - ${computeStreak().streak} days. Welcome back.`);
+  return true;
 }
 
 /* ---------------- Google Drive sync ---------------- */
@@ -1325,8 +1634,22 @@ function mergeDocs(local, remote) {
     for (const k in b) o[k] = Math.max(o[k] || 0, b[k] || 0);
     return o;
   };
-  const mergeTrue = (a = {}, b = {}) => ({ ...a, ...b }); // union of frozen / holiday days
+  const mergeTrue = (a = {}, b = {}) => ({ ...a, ...b }); // union of frozen / holiday / repaired days
+  // per-day per-bucket max, same "stale device can't erase" rationale as history
+  const mergeRatings = (a = {}, b = {}) => {
+    const o = { ...a };
+    for (const k in b) {
+      const x = o[k] || {}, y = b[k] || {};
+      o[k] = {
+        shallow: Math.max(x.shallow || 0, y.shallow || 0),
+        solid: Math.max(x.solid || 0, y.solid || 0),
+        deep: Math.max(x.deep || 0, y.deep || 0),
+      };
+    }
+    return o;
+  };
   const newer = (remote.updatedAt || 0) > (local.updatedAt || 0) ? remote : local;
+  const older = newer === remote ? local : remote;
   // config follows the most recent CONFIG edit, independent of session activity,
   // so changing the daily goal on one device isn't overwritten by newer focus
   // sessions on another. (Was the bug: config rode the global updatedAt.)
@@ -1337,14 +1660,19 @@ function mergeDocs(local, remote) {
     history: mergeMax(local.history, remote.history),
     minutes: mergeMax(local.minutes, remote.minutes),
     xpByDay: mergeMax(local.xpByDay, remote.xpByDay),
+    ratings: mergeRatings(local.ratings, remote.ratings),
     frozenDays: mergeTrue(local.frozenDays, remote.frozenDays),
+    repairedDays: mergeTrue(local.repairedDays, remote.repairedDays),
     holidays: mergeTrue(local.holidays, remote.holidays),
-    tasks: newer.tasks || [],
-    activeTask: newer.activeTask ?? null,
+    // ?? (not ||) so a blob from an old app version can't wipe goals, while a
+    // deliberately emptied list still wins
+    goals: newer.goals ?? older.goals ?? [],
+    activeGoal: newer.activeGoal ?? null,
     pomoSinceLong: newer.pomoSinceLong || 0,
     cycleDay: newer.cycleDay ?? null,
-    gems: newer.gems || 0,        // balance: latest device wins
     freezes: newer.freezes || 0,  // balance: latest device wins
+    // latest day wins, safer than newest-doc-wins against cross-device double grants
+    freezeEarnedOn: [local.freezeEarnedOn, remote.freezeEarnedOn].filter(Boolean).sort().pop() || null,
     joined: earliestJoin,
     updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0),
     cfgUpdatedAt: Math.max(local.cfgUpdatedAt || 0, remote.cfgUpdatedAt || 0),
@@ -1364,6 +1692,7 @@ async function pullAndMerge() {
     ensureJoined();
     fillXpFromMinutes();
     applyFreezes();
+    maybeRepair();
     persistLocalOnly();
     syncSettingsUI();
     if (timerWasFresh) remainingMs = modeDurationMs();

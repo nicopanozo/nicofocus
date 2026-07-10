@@ -49,27 +49,30 @@
     <div class="bar"><div id="todayBar" style="width:0%"></div></div>
     <div class="goal-done" id="goalMsg"></div>
     <div class="weekstrip" id="weekStrip"></div>
+    <div class="repair-banner" id="repairBanner" hidden></div>
   </div>
 
   <div class="tasks">
     <div class="tasks-head">
-      <h2>Tasks</h2>
-      <button id="clearDone">Clear finished</button>
+      <h2>Goals</h2>
+      <div class="goals-actions">
+        <button id="planHint" title="Evidence-based planning tips">💡 How to plan</button>
+        <button id="clearDone">Clear finished</button>
+      </div>
     </div>
-    <div id="taskList"></div>
-    <button class="add-task" id="addTask">＋ Add Task</button>
-    <div class="task-form" id="taskForm" hidden>
-      <input type="text" id="taskNameInput" class="task-input" placeholder="What are you working on?" maxlength="120" />
+    <div id="goalList"></div>
+    <button class="add-task" id="addGoal">＋ Add Goal</button>
+    <div class="task-form" id="goalForm" hidden>
+      <input type="text" id="goalNameInput" class="task-input" placeholder="What do you want to achieve?" maxlength="120" />
+      <input type="text" id="goalEnough" class="task-input" placeholder="What would be enough? (optional)" maxlength="160" />
       <div class="task-form-foot">
-        <div class="est-stepper">
-          <span class="est-cap">Est. sessions</span>
-          <button class="est-btn" id="estMinus" type="button" aria-label="fewer">−</button>
-          <span class="est-val" id="estVal">1</span>
-          <button class="est-btn" id="estPlus" type="button" aria-label="more">+</button>
+        <div class="goal-deadline-row">
+          <span class="est-cap">Deadline (optional)</span>
+          <input type="date" id="goalDeadline" />
         </div>
         <div class="task-form-actions">
-          <button class="btn-ghost" id="taskCancel" type="button">Cancel</button>
-          <button class="btn-dark" id="taskSave" type="button">Save</button>
+          <button class="btn-ghost" id="goalCancel" type="button">Cancel</button>
+          <button class="btn-dark" id="goalSave" type="button">Save</button>
         </div>
       </div>
     </div>
@@ -99,7 +102,7 @@
         <div class="set-row"><span class="name">Daily goal (sessions)</span><input type="number" id="cfgGoal" class="small" min="1" /></div>
         <div class="hint" style="margin-bottom:10px">Your daily target for the progress bar. The streak itself only needs 1 session per day.</div>
         <div class="set-row"><span class="name">Rest on weekends</span><div class="toggle" id="cfgRestWeekends"></div></div>
-        <div class="hint">When on, Saturdays and Sundays never break your streak and don't need a session. Earn 💎 by focusing and bank 🧊 freezes (max 2) to auto-cover a missed work day.</div>
+        <div class="hint">When on, Saturdays and Sundays never break your streak and don't need a session. 🧊 Freezes (max 2) auto-cover a missed work day - you earn one back for every 7 days of streak. A freshly broken streak can also be repaired by finishing 2 sessions the day you come back.</div>
       </div>
 
       <div class="set-group">
@@ -176,10 +179,9 @@
       </div>
 
       <div class="gem-row">
-        <span class="gem-item" title="Earn gems by focusing"><span class="gem-ico">💎</span><b id="rGems">0</b><span class="gem-cap">gems</span></span>
-        <span class="gem-sep"></span>
         <span class="gem-item" title="Auto-used to save your streak on a missed work day"><span class="gem-ico">🧊</span><b id="rFreezes">0</b><span class="gem-cap">of 2 freezes</span></span>
-        <button class="btn-soft" id="buyFreeze">Buy freeze · 15 💎</button>
+        <span class="gem-sep"></span>
+        <span class="gem-cap">Earn one back for every 7-day streak</span>
       </div>
 
       <div class="holiday-box">
@@ -198,6 +200,8 @@
         <div class="wh-sub" id="whSub"></div>
       </div>
 
+      <div class="wk-compare" id="weekCompare"></div>
+
       <div class="chart-head">
         <div class="heat-title" style="margin:0">This week vs last</div>
         <div class="view-toggle">
@@ -210,7 +214,10 @@
         <div class="chart" id="chart"></div>
       </div>
       <div class="chart-legend" style="justify-content:flex-end;margin-bottom:18px">
-        <span><i class="lg-dot" id="lgCur"></i>This week</span>
+        <span><i class="lg-dot" style="background:#104281"></i>Deep</span>
+        <span><i class="lg-dot" style="background:#2a78d6"></i>Solid</span>
+        <span><i class="lg-dot" style="background:#86b6ef"></i>Shallow</span>
+        <span><i class="lg-dot" style="background:#b3b8c2"></i>Unrated</span>
         <span><i class="lg-dot" style="background:#e0e0e0"></i>Last week</span>
       </div>
 
@@ -241,7 +248,34 @@
     <div class="sd-card focus"><div class="sd-cap">Focus</div><div class="sd-val" id="sdTime">0m</div></div>
     <div class="sd-card today"><div class="sd-cap">Today</div><div class="sd-val" id="sdToday">0</div></div>
   </div>
+  <div class="sd-rate">
+    <div class="sd-rate-cap">How deep was your focus?</div>
+    <div class="sd-rate-btns">
+      <button class="sd-rate-btn" data-q="shallow">Shallow</button>
+      <button class="sd-rate-btn" data-q="solid">Solid</button>
+      <button class="sd-rate-btn" data-q="deep">Deep flow</button>
+    </div>
+  </div>
   <button class="cel-btn" id="sdBtn">Continue</button>
+</div>
+
+<!-- Planning tips -->
+<div class="overlay" id="hintModal" hidden>
+  <div class="modal">
+    <div class="modal-head">How to plan <button class="close" data-close>×</button></div>
+    <div class="modal-body">
+      <div class="tip-card">
+        <div class="tip-main" id="tipMain"></div>
+        <div class="tip-detail" id="tipDetail"></div>
+        <div class="tip-source" id="tipSource"></div>
+      </div>
+      <div class="tip-nav">
+        <button class="btn-soft" id="tipPrev">← Prev</button>
+        <span class="tip-count" id="tipCount">1 / 12</span>
+        <button class="btn-soft" id="tipNext">Next →</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Streak celebration -->

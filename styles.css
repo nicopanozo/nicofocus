@@ -114,8 +114,9 @@
   .bar { height: 10px; background: rgba(0, 0, 0, 0.18); border-radius: 6px; overflow: hidden; }
   .bar > div { height: 100%; background: var(--ink); border-radius: 6px; transition: width 0.4s ease; }
   .goal-done { font-size: 13px; margin-top: 9px; opacity: 0.9; }
+  .repair-banner { margin-top: 14px; background: rgba(0, 0, 0, 0.16); border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600; }
 
-  /* ---- tasks ---- */
+  /* ---- goals ---- */
   .tasks { }
   .tasks-head {
     display: flex; justify-content: space-between; align-items: center;
@@ -127,28 +128,47 @@
     background: var(--card); border: none; color: var(--ink);
     border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 13px; font-weight: 600;
   }
-  .task {
+  .goals-actions { display: flex; gap: 8px; }
+  .goal {
     background: #fff; color: #555; border-radius: 8px;
     padding: 12px 14px; margin-bottom: 9px;
-    display: flex; align-items: center; gap: 11px;
-    border-left: 5px solid transparent; cursor: pointer;
+    border-left: 5px solid transparent;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   }
-  .task.active { border-left-color: var(--bg); }
-  .task.done { opacity: 0.55; }
-  .task.done .task-name { text-decoration: line-through; }
+  .goal.active { border-left-color: var(--bg); }
+  .goal.done { opacity: 0.55; }
+  .goal.done .goal-name { text-decoration: line-through; }
+  .goal-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .goal-name { flex: 1; font-weight: 600; font-size: 15px; }
+  .goal-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .goal-chip { font-size: 11px; font-weight: 700; color: #888; background: #f0f0f0; border-radius: 999px; padding: 3px 8px; white-space: nowrap; }
+  .goal-chip.soon { color: #a8730a; background: #fdf3dd; }
+  .goal-chip.over { color: #cf6679; background: #fbecef; }
+  .goal-chip.done-chip { color: #2e7d3f; background: #e6f4ea; }
+  .goal-body { margin-top: 10px; border-top: 1px solid #f0f0f0; padding-top: 10px; }
+  .goal-enough { font-size: 12px; color: #999; font-weight: 600; margin-bottom: 8px; }
+  .cp { display: flex; align-items: center; gap: 11px; padding: 7px 0; cursor: pointer; }
+  .cp-text { flex: 1; font-weight: 600; font-size: 14px; }
+  .cp.done { opacity: 0.55; }
+  .cp.done .cp-text { text-decoration: line-through; }
   .check {
     width: 22px; height: 22px; border-radius: 50%;
     border: 2px solid #ccc; flex-shrink: 0; position: relative;
   }
-  .task.done .check { background: #aaa; border-color: #aaa; }
-  .task.done .check::after {
+  .cp.done .check { background: #aaa; border-color: #aaa; }
+  .cp.done .check::after {
     content: ""; position: absolute; left: 6px; top: 2px;
     width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0;
     transform: rotate(45deg);
   }
-  .task-name { flex: 1; font-weight: 600; font-size: 15px; }
-  .task-pomo { color: #999; font-weight: 700; font-size: 14px; }
+  .cp-add {
+    width: 100%; border: none; background: #f7f7f7; border-radius: 8px;
+    padding: 9px 12px; font-size: 14px; font-weight: 600; color: #333; margin-top: 6px;
+  }
+  .cp-add:focus { outline: none; background: #f0f0f0; }
+  .cp-cap { font-size: 12px; color: #aaa; font-weight: 600; margin-top: 8px; }
+  .iterate-box { background: #fdf6e3; color: #8a6d1a; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600; margin-top: 8px; }
+  .goal-actions { display: flex; gap: 8px; margin-top: 12px; }
   .task-del {
     background: none; border: none; color: #ccc; cursor: pointer;
     font-size: 18px; padding: 0 4px; line-height: 1;
@@ -259,6 +279,7 @@
   .wday.rest .ring { background: rgba(255, 255, 255, 0.05); }
   .wday.rest .lbl { opacity: 0.4; }
   .wday.frozen .ring { background: rgba(168, 214, 240, 0.9); font-size: 14px; }
+  .wday.repaired .ring { background: rgba(240, 200, 120, 0.85); font-size: 14px; }
   .wday.holiday .ring { background: rgba(120, 200, 130, 0.28); border: 2px solid rgba(150, 220, 130, 0.9); font-size: 14px; }
   /* crisp gapped ring on today: bg-colored inner shadow makes the gap */
   .wday.today .lbl { opacity: 1; }
@@ -312,7 +333,7 @@
 
   /* ---- weekly XP chart (in profile) ---- */
   .chart-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-  .chart-legend { display: flex; gap: 14px; font-size: 11px; color: #999; font-weight: 600; }
+  .chart-legend { display: flex; gap: 10px 14px; font-size: 11px; color: #999; font-weight: 600; flex-wrap: wrap; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
   .lg-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
   .chart-row { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 4px; }
@@ -327,7 +348,9 @@
   .chart-bars { display: flex; align-items: flex-end; gap: 3px; height: 100%; width: 100%; justify-content: center; }
   .chart-bars .bar { width: 42%; min-height: 2px; border-radius: 4px 4px 0 0; transition: height 0.4s ease; }
   .chart-bars .bar.prev { background: #e0e0e0; }
-  .chart-bars .bar.cur { background: #45474b; }
+  /* the current-week bar is a stack of depth segments (deep at the bottom) */
+  .chart-bars .bar.cur { background: transparent; display: flex; flex-direction: column-reverse; overflow: hidden; }
+  .bar.cur .seg { width: 100%; }
   .chart-lbl { font-size: 11px; color: #aaa; font-weight: 700; margin-top: 7px; }
   .chart-lbl.today { color: #333; }
   .week-focus { display: flex; justify-content: space-between; font-size: 13px; color: #666; font-weight: 600; margin: 4px 0 20px; }
@@ -340,8 +363,7 @@
   .gem-item b { color: #222; font-size: 17px; }
   .gem-item .gem-cap { color: #999; }
   .gem-sep { width: 1px; align-self: stretch; background: #e0e0e0; }
-  .gem-row .btn-soft { margin-left: auto; white-space: nowrap; }
-  .gem-row .btn-soft:disabled { opacity: 0.45; cursor: not-allowed; }
+  .gem-row > .gem-cap { color: #999; }
 
   /* holidays (free, manual streak protection) */
   .holiday-box { background: #f5f5f5; border-radius: 10px; padding: 12px 14px; margin-bottom: 20px; }
@@ -391,7 +413,17 @@
   .sd-card.xp .sd-val    { color: #ffd84a; }
   .sd-card.focus .sd-val { color: #a6e0f5; }
   .sd-card.today .sd-val { color: #bcf0a8; }
-  .session-done .cel-btn { margin-top: 38px; width: 100%; max-width: 340px; border-radius: 14px; }
+  /* optional depth rating on the session-done screen (skippable, informational) */
+  .sd-rate { margin-top: 26px; }
+  .sd-rate-cap { font-size: 11px; font-weight: 800; letter-spacing: 1px; opacity: 0.8; text-transform: uppercase; margin-bottom: 10px; }
+  .sd-rate-btns { display: flex; gap: 10px; justify-content: center; }
+  .sd-rate-btn {
+    background: rgba(0, 0, 0, 0.16); border: 2px solid rgba(255, 255, 255, 0.25); color: var(--ink);
+    border-radius: 999px; padding: 9px 16px; font-weight: 700; font-size: 14px; cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .sd-rate-btn.sel { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .session-done .cel-btn { margin-top: 30px; width: 100%; max-width: 340px; border-radius: 14px; }
   @media (prefers-reduced-motion: reduce) {
     .session-done.open .sd-emoji, .session-done.open .sd-burst::before { animation: none; transform: scale(1); }
     .sd-card { transition: none; transform: none; }
@@ -405,6 +437,16 @@
   .wh-sub b { color: #4a9d52; }
   .wh-sub b.down { color: #cf6679; }
 
+  /* you vs last-week-you comparison rows */
+  .wk-compare { background: #f5f5f5; border-radius: 10px; padding: 6px 14px; margin-bottom: 20px; }
+  .wkc-row { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ececec; font-size: 13px; }
+  .wkc-row:last-child { border-bottom: none; }
+  .wkc-name { color: #888; font-weight: 600; flex: 1; }
+  .wkc-val { color: #222; }
+  .wkc-delta { font-size: 12px; font-weight: 600; color: #999; }
+  .wkc-delta.up { color: #4a9d52; }
+  .wkc-delta.down { color: #cf6679; }
+
   /* xp / time view toggle */
   .view-toggle { display: inline-flex; background: #eee; border-radius: 8px; padding: 3px; }
   .vt-btn { border: none; background: none; padding: 5px 14px; border-radius: 6px; font-size: 13px; font-weight: 700; color: #999; cursor: pointer; }
@@ -416,16 +458,23 @@
 
   .gem-row { flex-wrap: wrap; }
 
-  /* inline add-task form (replaces the prompt popup) */
+  /* inline add-goal form (replaces the prompt popup) */
   .task-form { background: #fff; border-radius: 10px; padding: 14px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
   .task-input { width: 100%; border: none; background: transparent; font-size: 16px; font-weight: 600; color: #333; padding: 4px 2px 12px; border-bottom: 2px solid #eee; }
   .task-input:focus { outline: none; border-bottom-color: #bbb; }
   .task-form-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; gap: 10px; flex-wrap: wrap; }
-  .est-stepper { display: flex; align-items: center; gap: 8px; color: #888; font-size: 13px; font-weight: 600; }
-  .est-btn { width: 30px; height: 30px; border: none; background: #efefef; border-radius: 7px; font-size: 18px; font-weight: 700; color: #555; cursor: pointer; line-height: 1; }
-  .est-btn:hover { background: #e4e4e4; }
-  .est-val { min-width: 20px; text-align: center; font-weight: 800; color: #333; font-size: 15px; }
+  .goal-deadline-row { display: flex; align-items: center; gap: 8px; color: #888; font-size: 13px; font-weight: 600; }
+  .est-cap { white-space: nowrap; }
+  input[type="date"] { border: none; background: #efefef; border-radius: 8px; padding: 8px 10px; font-size: 14px; font-weight: 600; color: #444; font-family: inherit; }
   .task-form-actions { display: flex; gap: 8px; }
+
+  /* planning tips modal */
+  .tip-card { background: #f7f7f7; border-radius: 12px; padding: 18px; }
+  .tip-main { font-size: 17px; font-weight: 800; color: #333; margin-bottom: 10px; }
+  .tip-detail { font-size: 14px; color: #666; line-height: 1.5; font-weight: 500; }
+  .tip-source { font-size: 12px; color: #aaa; font-weight: 600; margin-top: 12px; }
+  .tip-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+  .tip-count { font-size: 12px; color: #999; font-weight: 700; }
 
   /* ---- responsive: comfortable on phones ---- */
   @media (max-width: 480px) {
